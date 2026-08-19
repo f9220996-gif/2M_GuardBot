@@ -58,6 +58,10 @@ from cleanup import (
 from nav import track_nav_state, handle_back_step
 from image_lang import open_image_lang_panel, set_image_lang_cb
 
+# ===== اضافه شده: هوش مصنوعی =====
+from ai_simple import ai_handler
+# ================================
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -301,6 +305,13 @@ def main():
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, guarded_group_text
     ))
+
+    # ===== اضافه شده: هوش مصنوعی (فقط با تگ شدن) =====
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+        ai_handler
+    ), group=3)
+    # =================================================
 
     # ---- چک لیست سیاه گیف/استیکر روی هر پیام مدیا ----
     app.add_handler(MessageHandler(
