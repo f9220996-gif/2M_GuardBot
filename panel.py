@@ -451,6 +451,7 @@ def _build_features_keyboard(chat_id):
         [btn("photos"), btn("videos")],
         [btn("documents"), btn("date")],
         [btn("dollar")],
+        [btn("ai_moderation")],  # دکمه جدید
         [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")],
     ]
     return InlineKeyboardMarkup(rows_kb)
@@ -586,7 +587,7 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
     import time as _time
 
     if action == "mute":
-        until_ts = _time.time() + 10 * 60  # پیش‌فرض ۱۰ دقیقه
+        until_ts = _time.time() + 10 * 60
         from persian_date import utc_from_ts
         try:
             await context.bot.restrict_chat_member(
