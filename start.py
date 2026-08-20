@@ -43,26 +43,23 @@ def build_start_keyboard(user_id: int, bot_username: str):
     if user_id == CREATOR_ID:
         rows.append([InlineKeyboardButton("👑 پنل ویژه سازنده", callback_data="creator_panel_open")])
     
-    # ===== دکمه ری‌استارت (همیشه پایین) =====
+    # دکمه ری‌استارت
     rows.append([InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
-    # ========================================
     
     return InlineKeyboardMarkup(rows)
 
 
-# ===== فقط دکمه صفحه قبل (بدون بازگشت به منو) =====
 BACK_STEP_BUTTON_TEXT = "◀️ صفحه قبل"
 
 PERSISTENT_KEYBOARD = ReplyKeyboardMarkup(
-    [[BACK_STEP_BUTTON_TEXT]],  # فقط صفحه قبل
+    [[BACK_STEP_BUTTON_TEXT]],
     resize_keyboard=True,
     is_persistent=True,
 )
-# =================================================
 
 
 async def send_start_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """فقط پنل اصلی (با دکمه‌های شیشه‌ای) رو می‌فرسته، بدون تکرار پیام تنظیم کیبورد ثابت"""
+    """فقط پنل اصلی (با دکمه‌های شیشه‌ای) رو می‌فرسته"""
     user = update.effective_user
     bot_username = (await context.bot.get_me()).username
     await update.effective_message.reply_text(
@@ -76,19 +73,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     if chat.type != "private":
-        return  # فقط در پی‌وی پیام خوش‌آمد نشون بده
+        return
 
-    # چک خاموشی سراسری ربات (به جز سازنده)
     if not db.is_global_active() and user.id != CREATOR_ID:
         await update.effective_message.reply_text(db.get_shutdown_message())
         return
 
-    # ===== دکمه ثابت پایین (فقط صفحه قبل) =====
     await update.effective_message.reply_text(
         "🔽 از دکمه پایین برای رفتن به صفحه قبل استفاده کن.",
         reply_markup=PERSISTENT_KEYBOARD
     )
-    # =========================================
 
     await send_start_panel(update, context)
 
@@ -121,9 +115,27 @@ async def on_help_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    # ===== دکمه بازگشت (شیشه‌ای) =====
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]
     ])
     await query.message.reply_text(HELP_TEXT, reply_markup=kb)
-    # ================================
+
+
+# ===== تابع ری‌استارت =====
+async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ری‌استارت ربات (فقط برای سازنده)"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = update.effective_user
+    if user.id != CREATOR_ID:
+        await query.edit_message_text("⛔️ فقط سازنده ربات می‌تونه ری‌استارت کنه.")
+        return
+    
+    await query.edit_message_text("🔄 ربات در حال ری‌استارت...")
+    
+    # ری‌استارت واقعی برای Railway
+    import sys
+    import os
+    os.execv(sys.executable, ['python'] + sys.argv)
+# ============================
