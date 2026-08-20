@@ -37,8 +37,8 @@ def init_db():
             added_by_user_id INTEGER,
             added_by_username TEXT,
             is_locked INTEGER DEFAULT 0,
-            lock_until REAL,          -- زمان یونیکس برای باز شدن خودکار، NULL یعنی قفل دائم
-            is_active INTEGER DEFAULT 1  -- روشن/خاموش بودن ربات فقط برای این گروه
+            lock_until REAL,
+            is_active INTEGER DEFAULT 1
         )
         """)
 
@@ -49,7 +49,7 @@ def init_db():
             user_id INTEGER,
             username TEXT,
             reason TEXT,
-            level INTEGER,       -- شماره اخطار در چرخه فعلی (۱ تا ۶)
+            level INTEGER,
             created_at REAL
         )
         """)
@@ -63,7 +63,7 @@ def init_db():
             reason TEXT,
             has_reason INTEGER DEFAULT 1,
             muted_at REAL,
-            until_at REAL,        -- NULL یعنی سکوت نامحدود
+            until_at REAL,
             active INTEGER DEFAULT 1
         )
         """)
@@ -102,14 +102,14 @@ def init_db():
         c.execute("""
         CREATE TABLE IF NOT EXISTS bad_words (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER,   -- NULL یعنی سراسری (برای همه گروه‌ها)
+            chat_id INTEGER,
             word TEXT
         )
         """)
 
         c.execute("""
         CREATE TABLE IF NOT EXISTS warning_texts (
-            chat_id INTEGER,     -- NULL یعنی پیش‌فرض سراسری
+            chat_id INTEGER,
             level INTEGER,
             text TEXT,
             sticker_file_id TEXT,
@@ -171,14 +171,13 @@ def init_db():
             animation_file_id TEXT
         )
         """)
-        # برای دیتابیس‌های قدیمی که قبلاً بدون این دو ستون ساخته شدن
         for col in ("sticker_file_id", "animation_file_id"):
             try:
                 c.execute(f"ALTER TABLE welcome_messages ADD COLUMN {col} TEXT")
             except sqlite3.OperationalError:
                 pass
 
-        # مقداردهی اولیه کلمات بد سراسری در صورت خالی بودن
+        # مقداردهی اولیه کلمات بد سراسری
         c.execute("SELECT COUNT(*) as cnt FROM bad_words WHERE chat_id IS NULL")
         if c.fetchone()["cnt"] == 0:
             for w in DEFAULT_BAD_WORDS:
@@ -193,7 +192,7 @@ def init_db():
                     (lvl, txt)
                 )
 
-        # تنظیمات پیش‌فرض ربات (روشن/خاموش سراسری)
+        # تنظیمات پیش‌فرض ربات
         c.execute("SELECT value FROM bot_settings WHERE key = 'global_active'")
         if c.fetchone() is None:
             c.execute("INSERT INTO bot_settings (key, value) VALUES ('global_active', '1')")
@@ -275,8 +274,6 @@ def add_warning(chat_id, user_id, username, reason, level):
 
 
 def get_active_warning_count(chat_id, user_id):
-    """تعداد اخطارهای چرخه فعلی (بعد از بن، چرخه ریست می‌شود چون رکوردهای قبل حذف نمی‌شوند
-    بلکه بر اساس آخرین بن فیلتر می‌کنیم)"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute(
@@ -380,7 +377,6 @@ def remove_mute(chat_id, user_id):
 
 
 def update_mute_duration(chat_id, user_id, new_until_ts):
-    """تغییر زمان پایان سکوت فعلیِ یک کاربر (بدون تغییر دلیل ثبت‌شده)"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute(
@@ -509,7 +505,7 @@ def remove_bad_word(chat_id, word):
 
 
 # ---------------------------------------------------------------------------
-# تنظیمات کلی ربات (خاموشی سراسری سازنده)
+# تنظیمات کلی ربات
 # ---------------------------------------------------------------------------
 
 def get_setting(key, default=None):
@@ -547,7 +543,7 @@ def set_shutdown_message(text):
 
 
 # ---------------------------------------------------------------------------
-# مدیران اضافه (مدیرانی که مالک گروه اجازه ویژه بهشون داده)
+# مدیران اضافه
 # ---------------------------------------------------------------------------
 
 def grant_admin_extra_permission(chat_id, user_id, granted_by):
@@ -582,10 +578,9 @@ def has_admin_extra_permission(chat_id, user_id):
 
 
 # ---------------------------------------------------------------------------
-# روشن/خاموش کردن قابلیت‌های هر گروه (فیلتر فحش، بازی‌ها، بلک‌لیست و ...)
+# قابلیت‌های هر گروه
 # ---------------------------------------------------------------------------
 
-# لیست قابلیت‌های قابل روشن/خاموش کردن: کلید داخلی -> نام نمایشی فارسی
 TOGGLEABLE_FEATURES = {
     "bad_words": "فیلتر فحش",
     "games": "بازی‌ها",
@@ -596,6 +591,7 @@ TOGGLEABLE_FEATURES = {
     "documents": "ارسال فایل",
     "date": "دستور تاریخ",
     "dollar": "دستور دلار",
+    "ai_moderation": "🤖 AI Moderation",
 }
 
 
@@ -607,7 +603,7 @@ def is_feature_enabled(chat_id, feature_key):
             (chat_id, feature_key)
         )
         row = c.fetchone()
-        return bool(row["enabled"]) if row else True  # پیش‌فرض: روشن
+        return bool(row["enabled"]) if row else True
 
 
 def set_feature_enabled(chat_id, feature_key, enabled: bool):
@@ -621,7 +617,7 @@ def set_feature_enabled(chat_id, feature_key, enabled: bool):
 
 
 # ---------------------------------------------------------------------------
-# گزارش کاربران توسط اعضای عادی (هر ۲ دقیقه یک‌جا برای مالک گروه ارسال می‌شود)
+# گزارش‌ها
 # ---------------------------------------------------------------------------
 
 def add_report(chat_id, reporter_id, reporter_username, reported_user_id, reported_username, message_snippet):
@@ -679,7 +675,7 @@ def clear_reports(chat_id):
 
 
 # ---------------------------------------------------------------------------
-# خوش‌آمدگویی به عضو جدید
+# خوش‌آمدگویی
 # ---------------------------------------------------------------------------
 
 DEFAULT_WELCOME_TEXT = "🌼 {user} عزیز، به گروه {group} خوش اومدی!\nامیدواریم لحظات خوبی رو اینجا بگذرونی."
@@ -753,7 +749,7 @@ def clear_welcome_media(chat_id):
 
 
 # ---------------------------------------------------------------------------
-# تنظیم زبان مقصد ترجمه برای هر گروه
+# ترجمه
 # ---------------------------------------------------------------------------
 
 def get_translate_lang(chat_id, default="fa"):
@@ -775,7 +771,7 @@ def set_translate_lang(chat_id, lang_code):
 
 
 # ---------------------------------------------------------------------------
-# پاک‌سازی خودکار پیام‌های قدیمی گروه
+# پاک‌سازی خودکار
 # ---------------------------------------------------------------------------
 
 def update_last_message_id(chat_id, message_id):
@@ -797,7 +793,6 @@ def get_last_message_id(chat_id):
 
 
 def get_cleanup_settings(chat_id):
-    """برمی‌گردونه (enabled, interval_days, count, last_cleanup_ts)"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute(
@@ -847,7 +842,7 @@ def get_all_cleanup_enabled_chats():
 
 
 # ---------------------------------------------------------------------------
-# زبان نمایش متن داخل عکس‌های قیمت (فارسی/انگلیسی/عربی)
+# زبان عکس قیمت‌ها
 # ---------------------------------------------------------------------------
 
 def get_image_lang(chat_id, default="fa"):
