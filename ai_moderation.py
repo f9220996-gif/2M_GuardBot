@@ -8,11 +8,9 @@ from datetime import datetime, timedelta
 import database as db
 
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel("gemini-3.6-flash")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 async def ai_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """تشخیص فحش با هوش مصنوعی فقط برای کاربران عادی"""
-    
     if not update.message or not update.message.text:
         return
     
@@ -24,11 +22,11 @@ async def ai_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         return
     
-    # ===== چک کردن قابلیت AI Moderation =====
+    # چک کردن قابلیت AI Moderation
     if not db.is_feature_enabled(chat.id, "ai_moderation"):
         return
     
-    # ===== نادیده گرفتن مدیران، مالک و سازنده =====
+    # نادیده گرفتن مدیران، مالک و سازنده
     try:
         member = await chat.get_member(user.id)
         if member.status in ("administrator", "creator"):
@@ -36,19 +34,14 @@ async def ai_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         pass
     
-    # ===== سازنده ربات رو هم نادیده بگیر =====
     from config import CREATOR_ID
     if user.id == CREATOR_ID:
         return
     
-    # ===== چک کردن پیام =====
     text = update.message.text
-    
-    # اگه پیام خیلی کوتاهه، نادیده بگیر
     if len(text.strip()) < 3:
         return
     
-    # ===== تشخیص با هوش مصنوعی =====
     try:
         prompt = f"""
         تو یه ربات مدیریت گروه هستی. فقط پیام‌های فارسی رو بررسی کن.
@@ -56,15 +49,12 @@ async def ai_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         پیام کاربر: "{text}"
         
         فقط به این فرمت JSON جواب بده:
-        {{
-            "is_bad": true/false,
-            "level": 1/2/3
-        }}
+        {{"is_bad": true/false, "level": 1/2/3}}
         
         سطح‌ها:
         1 = فحش خفیف (اخطار)
-        2 = فحش متوسط (سکوت کوتاه)
-        3 = فحش سنگین (سکوت طولانی)
+        2 = فحش متوسط (سکوت ۵ دقیقه)
+        3 = فحش سنگین (سکوت ۱۰ دقیقه)
         
         اگه پیام فحش نیست: is_bad = false
         """
@@ -72,7 +62,6 @@ async def ai_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = model.generate_content(prompt)
         result = response.text.strip()
         
-        # استخراج JSON
         json_match = re.search(r'\{.*\}', result, re.DOTALL)
         if not json_match:
             return
@@ -84,45 +73,29 @@ async def ai_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_bad:
             return
         
-        # ===== حذف پیام فحش =====
+        # حذف پیام فحش
         try:
             await update.message.delete()
         except:
             pass
         
-        # ===== اقدام بر اساس سطح =====
-        # گرفتن تنظیمات از دیتابیس
-        warnings = db.get_warnings(chat.id, user.id)
-        if warnings is None:
-            warnings = 0
+        username = f"@{user.username}" if user.username else user.full_name
         
-        # افزایش تعداد اخطار
-        warnings += 1
-        db.set_warnings(chat.id, user.id, warnings)
-        
-        # اقدام متناسب با سطح
+        # اقدام بر اساس سطح
         if level == 1:
-            # اخطار با پیام
-            msg = f"⚠️ {user.first_name} لطفاً ادب رو رعایت کن! (اخطار {warnings})"
-            await update.message.reply_text(msg)
-            
+            await update.message.reply_text(f"⚠️ {username} لطفاً ادب رو رعایت کن!")
         elif level == 2:
-            # سکوت ۵ دقیقه
             until = datetime.now() + timedelta(minutes=5)
             try:
                 await chat.ban_member(user.id, until_date=until)
-                msg = f"🔇 {user.first_name} به مدت ۵ دقیقه سکوت شد."
-                await update.message.reply_text(msg)
+                await update.message.reply_text(f"🔇 {username} به مدت ۵ دقیقه سکوت شد.")
             except:
                 pass
-                
         elif level >= 3:
-            # سکوت ۱۰ دقیقه
             until = datetime.now() + timedelta(minutes=10)
             try:
                 await chat.ban_member(user.id, until_date=until)
-                msg = f"🔇 {user.first_name} به مدت ۱۰ دقیقه سکوت شد."
-                await update.message.reply_text(msg)
+                await update.message.reply_text(f"🔇 {username} به مدت ۱۰ دقیقه سکوت شد.")
             except:
                 pass
                 
