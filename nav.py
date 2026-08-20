@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ردیابی ساده‌ی اینکه کاربر الان تو کدوم سطح از پنل هست، تا دکمه ثابت
-«◀️ صفحه قبل» بتونه یک قدم برگرده (برخلاف «🔙 منوی اصلی» که کامل برمی‌گرده).
-
+«◀️ صفحه قبل» بتونه یک قدم برگرده.
 سطح‌ها:
 0 = منوی اصلی
 1 = لیست گروه‌ها
@@ -10,16 +9,13 @@
 3 = هر زیرصفحه‌ی دیگه (بن‌شده‌ها، سکوت‌خورده‌ها، قابلیت‌ها، خوش‌آمدگویی، و...)
 """
 
-from telegram import Update
+from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 
-LEVEL0_PREFIXES = ("start_menu", "help_commands", "creator_panel_open")
+LEVEL0_PREFIXES = ("start_menu", "help_commands", "creator_panel_open", "restart_bot")
 LEVEL1_PREFIXES = ("panel_my_groups", "grp_active_on:", "grp_active_off:")
 LEVEL2_PREFIXES = ("grp_open:",)
-# هر چیز دیگه‌ای که با چک‌باکس‌های شناخته‌شده شروع بشه، سطح ۳ حساب می‌شه
-# این‌ها گزارش رو با report_id (نه chat_id) صدا می‌زنن؛ نباید chat_id ذخیره‌شده رو خراب کنن
 LEVEL3_NO_CHATID_PREFIXES = ("report_open:", "report_act:")
-
 LEVEL3_PREFIXES = (
     "grp_banned:", "grp_muted:", "grp_warned:", "grp_features:", "feat_toggle:",
     "wc_", "grp_reports:", "reports_clear:",
@@ -30,8 +26,7 @@ LEVEL3_PREFIXES = (
 
 
 async def track_nav_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """قبل از هر هندلر دیگه‌ای (group=-1) اجرا می‌شه و وضعیت رو ثبت می‌کنه؛
-    وقتی از منوی اصلی خارج/واردش می‌شیم، دکمه‌ی ثابت پایین رو نشون/مخفی می‌کنه"""
+    """قبل از هر هندلر دیگه‌ای (group=-1) اجرا می‌شه و وضعیت رو ثبت می‌کنه"""
     query = update.callback_query
     if not query or not query.data:
         return
@@ -61,7 +56,7 @@ async def track_nav_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not any(data.startswith(p) for p in LEVEL3_NO_CHATID_PREFIXES):
             context.user_data["nav_chat_id"] = chat_id
     else:
-        return  # این دکمه ربطی به پیمایش نداشت، چیزی عوض نشد
+        return
 
     new_level = context.user_data.get("nav_level", 0)
     if new_level == prev_level:
@@ -71,9 +66,11 @@ async def track_nav_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not chat or chat.type != "private":
         return
 
+    # مدیریت کیبورد ثابت پایین
+    from start import PERSISTENT_KEYBOARD
+    
     if new_level == 0 and prev_level != 0:
-        # برگشتیم به منوی اصلی -> دکمه ثابت پایین رو مخفی کن
-        from telegram import ReplyKeyboardRemove
+        # برگشت به منوی اصلی -> مخفی کردن کیبورد
         try:
             msg = await context.bot.send_message(chat.id, "🏠", reply_markup=ReplyKeyboardRemove())
             context.job_queue.run_once(
@@ -84,8 +81,7 @@ async def track_nav_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
     elif new_level != 0 and prev_level == 0:
-        # از منوی اصلی خارج شدیم -> دکمه ثابت پایین رو نشون بده
-        from start import PERSISTENT_KEYBOARD
+        # خروج از منوی اصلی -> نمایش کیبورد
         try:
             msg = await context.bot.send_message(chat.id, "🔽", reply_markup=PERSISTENT_KEYBOARD)
             context.job_queue.run_once(
@@ -113,21 +109,22 @@ async def handle_back_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     level = context.user_data.get("nav_level", 0)
     chat_id = context.user_data.get("nav_chat_id")
 
+    # سطح ۳ (زیرصفحه) -> برگشت به پنل گروه
     if level >= 3 and chat_id:
         await send_group_panel_message(update, context, chat_id)
         context.user_data["nav_level"] = 2
         return
 
+    # سطح ۲ (پنل گروه) -> برگشت به لیست گروه‌ها
     if level == 2 and chat_id:
         await show_my_groups(update, context)
         context.user_data["nav_level"] = 1
         context.user_data["nav_chat_id"] = None
         return
 
-    # سطح ۰ یا ۱ یا هر حالت نامشخص -> برو منوی اصلی (و کیبورد ثابت رو مخفی کن)
+    # سطح ۰ یا ۱ یا هر حالت نامشخص -> برو منوی اصلی
     await send_start_panel(update, context)
     if level != 0:
-        from telegram import ReplyKeyboardRemove
         try:
             msg = await update.effective_message.reply_text("🏠", reply_markup=ReplyKeyboardRemove())
             context.job_queue.run_once(
