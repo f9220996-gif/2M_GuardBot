@@ -57,6 +57,11 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
     if not user or user.is_bot:
         return
 
+    # ===== اگر AI Moderation روشن باشه، این فیلتر اجرا نشه =====
+    if db.is_feature_enabled(chat.id, "ai_moderation"):
+        return
+    # ===========================================================
+
     group = db.get_group(chat.id)
     if group and not group["is_active"]:
         return
