@@ -17,7 +17,7 @@ from telegram.ext import (
 import database as db
 from config import BOT_TOKEN, CREATOR_ID
 
-from start import cmd_start, on_help_button, send_start_panel, BACK_BUTTON_TEXT, BACK_STEP_BUTTON_TEXT, restart_bot
+from start import cmd_start, on_help_button, send_start_panel, BACK_STEP_BUTTON_TEXT, restart_bot
 from moderation import (
     cmd_khamoshi, cmd_roshan, cmd_sokoot, cmd_azad_kon, cmd_ban_kon,
     cmd_pak, cmd_gif_ban, cmd_sticker_ban, check_blacklisted_media, check_media_permissions
@@ -233,7 +233,6 @@ def main():
             if chat.type == "private":
                 await update.effective_message.reply_text(db.get_shutdown_message())
             return
-        # در پی‌وی منتظر متن خاموشی یا خوش‌آمدگویی یا اخطار می‌مانیم
         consumed = await receive_shutdown_text(update, context)
         if consumed:
             return
@@ -244,7 +243,6 @@ def main():
         if consumed:
             return
         text = (update.effective_message.text or "").strip()
-        # BACK_BUTTON_TEXT حذف شد، فقط BACK_STEP_BUTTON_TEXT هست
         if text == BACK_STEP_BUTTON_TEXT:
             await handle_back_step(update, context)
         elif text in PRICE_LOOKUP_NAMES:
