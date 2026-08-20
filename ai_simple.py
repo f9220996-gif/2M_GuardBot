@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel("gemini-3.6-flash")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -14,11 +14,11 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     bot_username = context.bot.username
     
-    # چک کن که یا @Bot توی متن هست یا اسم کامل ربات
+    # فقط اگه ربات تگ شده بود (با @Bot یا اسم کامل)
     if "@Bot" not in text and f"@{bot_username}" not in text:
         return
     
-    # پاک کردن @Bot یا اسم کامل از متن
+    # پاک کردن تگ
     question = re.sub(r"@Bot\s*", "", text)
     question = re.sub(f"@{bot_username}\s*", "", question)
     question = question.strip()
@@ -32,10 +32,8 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         response = model.generate_content(question)
         reply = response.text
-        
         if len(reply) > 4000:
             reply = reply[:4000] + "..."
-        
     except Exception as e:
         reply = f"❌ خطا: {str(e)}"
     
