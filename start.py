@@ -42,18 +42,23 @@ def build_start_keyboard(user_id: int, bot_username: str):
     ]
     if user_id == CREATOR_ID:
         rows.append([InlineKeyboardButton("👑 پنل ویژه سازنده", callback_data="creator_panel_open")])
+    
+    # ===== دکمه ری‌استارت (همیشه پایین) =====
+    rows.append([InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
+    # ========================================
+    
     return InlineKeyboardMarkup(rows)
 
 
-BACK_BUTTON_TEXT = "🔙 بازگشت به منو"
-
+# ===== فقط دکمه صفحه قبل (بدون بازگشت به منو) =====
 BACK_STEP_BUTTON_TEXT = "◀️ صفحه قبل"
 
 PERSISTENT_KEYBOARD = ReplyKeyboardMarkup(
-    [[BACK_STEP_BUTTON_TEXT, BACK_BUTTON_TEXT]],
+    [[BACK_STEP_BUTTON_TEXT]],  # فقط صفحه قبل
     resize_keyboard=True,
     is_persistent=True,
 )
+# =================================================
 
 
 async def send_start_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,11 +83,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(db.get_shutdown_message())
         return
 
-    # یه پیام کوچیک برای نگه‌داشتن دکمه ثابت «بازگشت به منو» کنار کیبورد
+    # ===== دکمه ثابت پایین (فقط صفحه قبل) =====
     await update.effective_message.reply_text(
-        "🔽 از دکمه پایین برای برگشت به منوی اصلی استفاده کن.",
+        "🔽 از دکمه پایین برای رفتن به صفحه قبل استفاده کن.",
         reply_markup=PERSISTENT_KEYBOARD
     )
+    # =========================================
 
     await send_start_panel(update, context)
 
@@ -114,4 +120,10 @@ HELP_TEXT = (
 async def on_help_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text(HELP_TEXT)
+    
+    # ===== دکمه بازگشت (شیشه‌ای) =====
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]
+    ])
+    await query.message.reply_text(HELP_TEXT, reply_markup=kb)
+    # ================================
