@@ -4,8 +4,15 @@ import google.generativeai as genai
 from telegram import Update
 from telegram.ext import ContextTypes
 
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
+else:
+    print("⚠️ GOOGLE_API_KEY تنظیم نشده!")
+
+# ===== مدل جدید gemini-3.6-flash =====
+model = genai.GenerativeModel("gemini-3.6-flash")
+# =====================================
 
 async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -14,11 +21,9 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     bot_username = context.bot.username
     
-    # فقط اگه ربات تگ شده بود (با @Bot یا اسم کامل)
     if "@Bot" not in text and f"@{bot_username}" not in text:
         return
     
-    # پاک کردن تگ
     question = re.sub(r"@Bot\s*", "", text)
     question = re.sub(f"@{bot_username}\s*", "", question)
     question = question.strip()
@@ -34,8 +39,8 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = response.text
         if len(reply) > 4000:
             reply = reply[:4000] + "..."
+        await thinking.delete()
+        await update.message.reply_text(reply)
     except Exception as e:
-        reply = f"❌ خطا: {str(e)}"
-    
-    await thinking.delete()
-    await update.message.reply_text(reply)
+        await thinking.delete()
+        await update.message.reply_text(f"❌ خطا: {str(e)}")
