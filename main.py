@@ -58,9 +58,9 @@ from cleanup import (
 from nav import track_nav_state, handle_back_step
 from image_lang import open_image_lang_panel, set_image_lang_cb
 
-# ===== اضافه شده: هوش مصنوعی =====
-from ai_simple import ai_handler
-# ================================
+# ===== اضافه شده: هوش مصنوعی تشخیص فحش =====
+from ai_moderation import ai_moderation
+# ===========================================
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -70,9 +70,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# فارسی‌سازی نام دستورات: چون خیلی از دستورات این ربات فارسی هستند
-# (مثل "خاموشی"، "روشن"، "سکوت")، به‌جای CommandHandler معمولی از
-# MessageHandler با فیلتر متن + پارس دستی اول پیام استفاده می‌کنیم.
+# فارسی‌سازی نام دستورات
 # ---------------------------------------------------------------------------
 
 PERSIAN_COMMANDS = {
@@ -95,13 +93,8 @@ PERSIAN_COMMANDS = {
     "رمز ارز": cmd_crypto_all,
 }
 
-# اسم‌های تک رمزارز/دلار/طلا که با نوشتن تنها اسمشون قیمت‌شون نشون داده میشه
 PRICE_LOOKUP_NAMES = set(SYMBOL_MAP.keys()) | set(FIAT_GOLD_MAP.keys())
-
-# دستوراتی که به قابلیت «بازی‌ها» وابسته‌اند؛ اگر این قابلیت خاموش باشد اجرا نمی‌شوند
 GAME_COMMANDS = {"تاس", "شیر_یا_خط", "سنگ_کاغذ_قیچی", "حدس_عدد", "حدس"}
-
-# مرتب‌سازی بر اساس طول (نزولی) تا مثلا "بن کن" قبل از "بن" چک بشه
 SORTED_COMMAND_KEYS = sorted(PERSIAN_COMMANDS.keys(), key=len, reverse=True)
 
 
@@ -116,7 +109,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for cmd_key in SORTED_COMMAND_KEYS:
         if text == cmd_key or text.startswith(cmd_key + " "):
             if cmd_key in GAME_COMMANDS and not db.is_feature_enabled(chat.id, "games"):
-                return  # بازی‌ها برای این گروه خاموش است
+                return
             rest = text[len(cmd_key):].strip()
             context.args = rest.split() if rest else []
             await PERSIAN_COMMANDS[cmd_key](update, context)
@@ -133,24 +126,17 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if consumed:
             return
 
-    # اگر دستور نبود، بررسی فحش
     await check_message_for_bad_words(update, context)
 
 
 async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    راه دوم ثبت گروه: وقتی پیام «عضو جدید» شامل خودِ ربات باشه.
-    این یه پشتیبان برای on_bot_added_to_group هست، چون گاهی آپدیت
-    my_chat_member به هر دلیلی (مثلا کرش هم‌زمان ربات) از دست می‌ره،
-    ولی پیام سیستمی «عضو جدید» تو خودِ گروه معمولا قابل‌اعتمادتره.
-    """
     message = update.effective_message
     if not message or not message.new_chat_members:
         return
 
     me = await context.bot.get_me()
     if me.id not in [m.id for m in message.new_chat_members]:
-        return  # این یه عضو معمولیه، نه خودِ ربات
+        return
 
     chat = update.effective_chat
     adder = message.from_user
@@ -170,7 +156,6 @@ async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """وقتی ربات به یک گروه جدید اضافه می‌شود، در دیتابیس ثبتش کن"""
     result: ChatMemberUpdated = update.my_chat_member
     if not result:
         return
@@ -178,7 +163,7 @@ async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TY
     new_status = result.new_chat_member.status
     chat = result.chat
     if chat.type not in ("group", "supergroup"):
-        return  # پی‌وی نیست، گروه واقعی نیست؛ ثبت نکن
+        return
     if new_status in ("member", "administrator"):
         adder = result.from_user
         db.upsert_group(
@@ -208,12 +193,6 @@ async def on_start_menu_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def global_shutdown_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    این هندلر با بالاترین اولویت (group=-1) روی همه‌ی آپدیت‌ها اجرا می‌شه.
-    اگه ربات به‌صورت سراسری توسط سازنده خاموش شده باشه، جلوی پردازش
-    همه‌ی هندلرهای دیگه (پیام، دکمه، عضو جدید، هرچی) رو می‌گیره —
-    فقط سازنده و پی‌وی (با پیام خاموشی) استثنا هستن.
-    """
     if db.is_global_active():
         return
     user = update.effective_user
@@ -240,9 +219,6 @@ def main():
 
     app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # ---- گیت خاموشی سراسری: اگر سازنده ربات رو خاموش کرده باشه، این دو تابع
-    # قبل از هر پردازشی چک می‌کنن و در گروه سکوت می‌کنن، در پی‌وی متن خاموشی میدن ----
-
     async def guarded_group_text(update, context):
         if not db.is_global_active() and update.effective_user.id != CREATOR_ID:
             return
@@ -255,7 +231,6 @@ def main():
             if chat.type == "private":
                 await update.effective_message.reply_text(db.get_shutdown_message())
             return
-        # در پی‌وی منتظر متن خاموشی (پنل سازنده) یا متن خوش‌آمدگویی (پنل گروه) می‌مانیم
         consumed = await receive_shutdown_text(update, context)
         if consumed:
             return
@@ -277,19 +252,18 @@ def main():
         elif text == "رمز ارز":
             await cmd_crypto_all(update, context)
 
-    # ---- دستورات استاندارد ----
-    # ---- گیت خاموشی سراسری: بالاترین اولویت، قبل از هر هندلر دیگه‌ای ----
+    # ---- گیت خاموشی سراسری ----
     app.add_handler(TypeHandler(Update, global_shutdown_gate), group=-1)
     app.add_handler(CallbackQueryHandler(track_nav_state), group=-1)
 
     app.add_handler(CommandHandler("start", cmd_start))
 
-    # ---- پیام‌های متنی پی‌وی (دستورات فارسی که در پی‌وی هم معنی ندارن ولی متن خاموشی رو می‌گیره) ----
+    # ---- پیام‌های متنی پی‌وی ----
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, guarded_private_text
     ))
 
-    # ---- گیف/استیکر/عکس ارسالی در پی‌وی (برای خوش‌آمدگویی یا ویرایش اخطارها) ----
+    # ---- گیف/استیکر/عکس در پی‌وی ----
     async def private_media_router(update, context):
         consumed = await receive_welcome_media(update, context)
         if consumed:
@@ -301,39 +275,38 @@ def main():
         private_media_router
     ))
 
-    # ---- پیام‌های متنی گروه (دستورات فارسی + فیلتر فحش) ----
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, guarded_group_text
-    ))
-
-    # ===== اضافه شده: هوش مصنوعی (فقط با تگ شدن) =====
+    # ===== هوش مصنوعی تشخیص فحش (گروه ۱) =====
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
-        ai_handler
-    ), group=3)
-    # =================================================
+        ai_moderation
+    ), group=1)
 
-    # ---- چک لیست سیاه گیف/استیکر روی هر پیام مدیا ----
+    # ---- پیام‌های متنی گروه (دستورات فارسی + فیلتر فحش) (گروه ۲) ----
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, guarded_group_text
+    ), group=2)
+
+    # ---- چک لیست سیاه گیف/استیکر ----
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & (filters.ANIMATION | filters.Sticker.ALL),
         check_blacklisted_media
     ))
 
-    # ---- چک روشن/خاموش بودن ارسال عکس/فیلم/فایل/گیف/استیکر برای اعضای عادی ----
+    # ---- چک روشن/خاموش ارسال مدیا ----
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & (
             filters.PHOTO | filters.VIDEO | filters.Document.ALL |
             filters.ANIMATION | filters.Sticker.ALL
         ),
         check_media_permissions
-    ), group=1)
+    ), group=3)
 
     # ---- عضویت ربات در گروه جدید ----
     app.add_handler(ChatMemberHandler(on_bot_added_to_group, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_chat_members))
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member_welcome), group=1)
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member_welcome), group=4)
 
-    # ---- دکمه‌های شیشه‌ای (Callback Query) ----
+    # ---- دکمه‌های شیشه‌ای ----
     app.add_handler(CallbackQueryHandler(on_help_button, pattern="^help_commands$"))
     app.add_handler(CallbackQueryHandler(on_start_menu_button, pattern="^start_menu$"))
     app.add_handler(CallbackQueryHandler(show_my_groups, pattern="^panel_my_groups$"))
@@ -377,14 +350,14 @@ def main():
     app.add_handler(CallbackQueryHandler(toggle_global, pattern="^creator_global_(on|off)$"))
     app.add_handler(CallbackQueryHandler(ask_set_shutdown_text, pattern="^creator_set_msg$"))
 
-    # ---- ارسال دوره‌ای گزارش‌های اعضا به مالک هر گروه (هر ۲ دقیقه) ----
+    # ---- ارسال دوره‌ای گزارش‌ها ----
     app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
 
-    # ---- پاک‌سازی خودکار پیام‌های قدیمی (هر ساعت چک می‌کنه کدوم گروه وقتش رسیده) ----
+    # ---- پاک‌سازی خودکار ----
     app.job_queue.run_repeating(run_auto_cleanup_job, interval=3600, first=300)
 
-    # ---- ثبت آخرین آیدی پیام هر گروه (برای پاک‌سازی خودکار) ----
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.ALL, track_last_message), group=2)
+    # ---- ثبت آخرین آیدی پیام ----
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.ALL, track_last_message), group=5)
 
     logger.info("🤖 ربات در حال اجراست...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
