@@ -17,7 +17,7 @@ from telegram.ext import (
 import database as db
 from config import BOT_TOKEN, CREATOR_ID
 
-from start import cmd_start, on_help_button, send_start_panel, BACK_BUTTON_TEXT, BACK_STEP_BUTTON_TEXT
+from start import cmd_start, on_help_button, send_start_panel, BACK_BUTTON_TEXT, BACK_STEP_BUTTON_TEXT, restart_bot
 from moderation import (
     cmd_khamoshi, cmd_roshan, cmd_sokoot, cmd_azad_kon, cmd_ban_kon,
     cmd_pak, cmd_gif_ban, cmd_sticker_ban, check_blacklisted_media, check_media_permissions
@@ -126,7 +126,9 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if consumed:
             return
 
-    await check_message_for_bad_words(update, context)
+    # اگر دستور نبود، بررسی فحش (فقط وقتی AI Moderation خاموش باشه)
+    if not db.is_feature_enabled(chat.id, "ai_moderation"):
+        await check_message_for_bad_words(update, context)
 
 
 async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -231,6 +233,7 @@ def main():
             if chat.type == "private":
                 await update.effective_message.reply_text(db.get_shutdown_message())
             return
+        # در پی‌وی منتظر متن خاموشی یا خوش‌آمدگویی یا اخطار می‌مانیم
         consumed = await receive_shutdown_text(update, context)
         if consumed:
             return
@@ -241,11 +244,8 @@ def main():
         if consumed:
             return
         text = (update.effective_message.text or "").strip()
-        if text == BACK_BUTTON_TEXT:
-            await send_start_panel(update, context)
-            context.user_data["nav_level"] = 0
-            context.user_data["nav_chat_id"] = None
-        elif text == BACK_STEP_BUTTON_TEXT:
+        # BACK_BUTTON_TEXT حذف شد، فقط BACK_STEP_BUTTON_TEXT هست
+        if text == BACK_STEP_BUTTON_TEXT:
             await handle_back_step(update, context)
         elif text in PRICE_LOOKUP_NAMES:
             await cmd_crypto_single(update, context)
@@ -281,7 +281,7 @@ def main():
         ai_moderation
     ), group=1)
 
-    # ---- پیام‌های متنی گروه (دستورات فارسی + فیلتر فحش) (گروه ۲) ----
+    # ---- پیام‌های متنی گروه (گروه ۲) ----
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, guarded_group_text
     ), group=2)
@@ -292,7 +292,7 @@ def main():
         check_blacklisted_media
     ))
 
-    # ---- چک روشن/خاموش ارسال مدیا ----
+    # ---- چک روشن/خاموش ارسال مدیا (گروه ۳) ----
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & (
             filters.PHOTO | filters.VIDEO | filters.Document.ALL |
@@ -306,7 +306,7 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_chat_members))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member_welcome), group=4)
 
-    # ---- دکمه‌های شیشه‌ای ----
+    # ---- دکمه‌های شیشه‌ای (Callback Query) ----
     app.add_handler(CallbackQueryHandler(on_help_button, pattern="^help_commands$"))
     app.add_handler(CallbackQueryHandler(on_start_menu_button, pattern="^start_menu$"))
     app.add_handler(CallbackQueryHandler(show_my_groups, pattern="^panel_my_groups$"))
@@ -349,6 +349,10 @@ def main():
     app.add_handler(CallbackQueryHandler(open_creator_panel, pattern="^creator_panel_open$"))
     app.add_handler(CallbackQueryHandler(toggle_global, pattern="^creator_global_(on|off)$"))
     app.add_handler(CallbackQueryHandler(ask_set_shutdown_text, pattern="^creator_set_msg$"))
+    
+    # ===== دکمه ری‌استارت =====
+    app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
+    # ===========================
 
     # ---- ارسال دوره‌ای گزارش‌ها ----
     app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
@@ -356,7 +360,7 @@ def main():
     # ---- پاک‌سازی خودکار ----
     app.job_queue.run_repeating(run_auto_cleanup_job, interval=3600, first=300)
 
-    # ---- ثبت آخرین آیدی پیام ----
+    # ---- ثبت آخرین آیدی پیام (گروه ۵) ----
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.ALL, track_last_message), group=5)
 
     logger.info("🤖 ربات در حال اجراست...")
