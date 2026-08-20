@@ -2,7 +2,6 @@
 """
 فایل اصلی اجرای ربات مدیریت گروه.
 اجرا: python main.py
-(قبلش حتما BOT_TOKEN و CREATOR_ID رو در config.py یا متغیرهای محیطی ست کنید)
 """
 
 import logging
@@ -58,9 +57,10 @@ from cleanup import (
 from nav import track_nav_state, handle_back_step
 from image_lang import open_image_lang_panel, set_image_lang_cb
 
-# ===== اضافه شده: هوش مصنوعی تشخیص فحش =====
+# ===== هوش مصنوعی =====
+from ai_simple import ai_handler
 from ai_moderation import ai_moderation
-# ===========================================
+# =====================
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -68,10 +68,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# فارسی‌سازی نام دستورات
-# ---------------------------------------------------------------------------
 
 PERSIAN_COMMANDS = {
     "خاموشی": cmd_khamoshi,
@@ -99,7 +95,6 @@ SORTED_COMMAND_KEYS = sorted(PERSIAN_COMMANDS.keys(), key=len, reverse=True)
 
 
 async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """پردازش پیام‌های متنی گروه: اول دستورات فارسی، بعد فیلتر فحش"""
     message = update.effective_message
     chat = update.effective_chat
     if not message or not chat or chat.type not in ("group", "supergroup"):
@@ -126,7 +121,6 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if consumed:
             return
 
-    # اگر دستور نبود، بررسی فحش (فقط وقتی AI Moderation خاموش باشه)
     if not db.is_feature_enabled(chat.id, "ai_moderation"):
         await check_message_for_bad_words(update, context)
 
@@ -135,11 +129,9 @@ async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE
     message = update.effective_message
     if not message or not message.new_chat_members:
         return
-
     me = await context.bot.get_me()
     if me.id not in [m.id for m in message.new_chat_members]:
         return
-
     chat = update.effective_chat
     adder = message.from_user
     db.upsert_group(
@@ -150,8 +142,7 @@ async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         await context.bot.send_message(
             chat.id,
-            "✅ ربات با موفقیت اضافه شد!\n"
-            "برای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
+            "✅ ربات با موفقیت اضافه شد!\nبرای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
         )
     except Exception:
         pass
@@ -161,7 +152,6 @@ async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TY
     result: ChatMemberUpdated = update.my_chat_member
     if not result:
         return
-
     new_status = result.new_chat_member.status
     chat = result.chat
     if chat.type not in ("group", "supergroup"):
@@ -176,8 +166,7 @@ async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TY
         try:
             await context.bot.send_message(
                 chat.id,
-                "✅ ربات با موفقیت اضافه شد!\n"
-                "برای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
+                "✅ ربات با موفقیت اضافه شد!\nبرای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
             )
         except Exception:
             pass
@@ -211,14 +200,11 @@ async def global_shutdown_gate(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def main():
     if not BOT_TOKEN or BOT_TOKEN == "PUT_YOUR_BOT_TOKEN_HERE":
-        raise SystemExit(
-            "❌ لطفاً اول BOT_TOKEN رو در config.py یا متغیر محیطی ست کنید."
-        )
+        raise SystemExit("❌ لطفاً اول BOT_TOKEN رو در config.py یا متغیر محیطی ست کنید.")
     if not CREATOR_ID:
         logger.warning("⚠️ CREATOR_ID تنظیم نشده — پنل ویژه سازنده کار نخواهد کرد.")
 
     db.init_db()
-
     app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     async def guarded_group_text(update, context):
@@ -250,18 +236,29 @@ def main():
         elif text == "رمز ارز":
             await cmd_crypto_all(update, context)
 
-    # ---- گیت خاموشی سراسری ----
+    # ===== گیت خاموشی =====
     app.add_handler(TypeHandler(Update, global_shutdown_gate), group=-1)
     app.add_handler(CallbackQueryHandler(track_nav_state), group=-1)
 
+    # ===== هوش مصنوعی پاسخ به سوالات (گروه 0) =====
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+        ai_handler
+    ), group=0)
+
+    # ===== هوش مصنوعی تشخیص فحش (گروه 1) =====
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+        ai_moderation
+    ), group=1)
+
+    # ===== دستورات =====
     app.add_handler(CommandHandler("start", cmd_start))
 
-    # ---- پیام‌های متنی پی‌وی ----
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, guarded_private_text
     ))
 
-    # ---- گیف/استیکر/عکس در پی‌وی ----
     async def private_media_router(update, context):
         consumed = await receive_welcome_media(update, context)
         if consumed:
@@ -273,24 +270,18 @@ def main():
         private_media_router
     ))
 
-    # ===== هوش مصنوعی تشخیص فحش (گروه ۱) =====
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
-        ai_moderation
-    ), group=1)
-
-    # ---- پیام‌های متنی گروه (گروه ۲) ----
+    # ===== پیام‌های گروه (گروه 2) =====
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, guarded_group_text
     ), group=2)
 
-    # ---- چک لیست سیاه گیف/استیکر ----
+    # ===== چک لیست سیاه گیف/استیکر =====
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & (filters.ANIMATION | filters.Sticker.ALL),
         check_blacklisted_media
     ))
 
-    # ---- چک روشن/خاموش ارسال مدیا (گروه ۳) ----
+    # ===== چک ارسال مدیا (گروه 3) =====
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & (
             filters.PHOTO | filters.VIDEO | filters.Document.ALL |
@@ -299,12 +290,12 @@ def main():
         check_media_permissions
     ), group=3)
 
-    # ---- عضویت ربات در گروه جدید ----
+    # ===== عضویت در گروه =====
     app.add_handler(ChatMemberHandler(on_bot_added_to_group, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_chat_members))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member_welcome), group=4)
 
-    # ---- دکمه‌های شیشه‌ای (Callback Query) ----
+    # ===== دکمه‌های شیشه‌ای =====
     app.add_handler(CallbackQueryHandler(on_help_button, pattern="^help_commands$"))
     app.add_handler(CallbackQueryHandler(on_start_menu_button, pattern="^start_menu$"))
     app.add_handler(CallbackQueryHandler(show_my_groups, pattern="^panel_my_groups$"))
@@ -350,15 +341,12 @@ def main():
     
     # ===== دکمه ری‌استارت =====
     app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
-    # ===========================
 
-    # ---- ارسال دوره‌ای گزارش‌ها ----
+    # ===== Jobها =====
     app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
-
-    # ---- پاک‌سازی خودکار ----
     app.job_queue.run_repeating(run_auto_cleanup_job, interval=3600, first=300)
 
-    # ---- ثبت آخرین آیدی پیام (گروه ۵) ----
+    # ===== ثبت آخرین آیدی پیام (گروه 5) =====
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.ALL, track_last_message), group=5)
 
     logger.info("🤖 ربات در حال اجراست...")
