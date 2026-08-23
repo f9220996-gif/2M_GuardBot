@@ -69,9 +69,9 @@ async def _user_can_manage(bot, user_id, chat_id):
 def _welcome_panel_keyboard(chat_id):
     enabled = db.is_feature_enabled(chat_id, "welcome")
     toggle = (
-        InlineKeyboardButton("❌ خاموش کردن خوش‌آمدگویی", callback_data=f"wc_off:{chat_id}")
+        InlineKeyboardButton("✘ خاموش کردن خوش‌آمدگویی", callback_data=f"wc_off:{chat_id}")
         if enabled else
-        InlineKeyboardButton("✅ روشن کردن خوش‌آمدگویی", callback_data=f"wc_on:{chat_id}")
+        InlineKeyboardButton("✔ روشن کردن خوش‌آمدگویی", callback_data=f"wc_on:{chat_id}")
     )
     sticker_id, animation_id = db.get_welcome_media(chat_id)
     media_row = (
@@ -100,7 +100,7 @@ async def open_welcome_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("⛔️ اجازه ندارید.", show_alert=True)
         return
 
-    status = "✅ فعال" if db.is_feature_enabled(chat_id, "welcome") else "❌ غیرفعال"
+    status = "✔ فعال" if db.is_feature_enabled(chat_id, "welcome") else "❌ غیرفعال"
     text = (
         "👋 تنظیمات خوش‌آمدگویی\n\n"
         f"وضعیت: {status}\n\n"
@@ -124,7 +124,7 @@ async def toggle_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db.set_feature_enabled(chat_id, "welcome", action == "wc_on")
-    await query.answer("ذخیره شد ✅")
+    await query.answer("ذخیره شد ✔")
     await open_welcome_panel(update, context)
 
 
@@ -168,7 +168,7 @@ async def reset_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db.reset_welcome_text(chat_id)
-    await query.answer("به پیش‌فرض برگشت ✅")
+    await query.answer("به پیش‌فرض برگشت ✔")
     await open_welcome_panel(update, context)
 
 
@@ -204,7 +204,7 @@ async def receive_welcome_text(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data[WAITING_WELCOME_TEXT_KEY] = None
     new_text = update.effective_message.text
     db.set_welcome_text(chat_id, new_text)
-    await update.effective_message.reply_text(f"✅ متن خوش‌آمدگویی ذخیره شد:\n\n{new_text}")
+    await update.effective_message.reply_text(f"✔ متن خوش‌آمدگویی ذخیره شد:\n\n{new_text}")
     return True
 
 
@@ -246,7 +246,7 @@ async def receive_welcome_media(update: Update, context: ContextTypes.DEFAULT_TY
         return True
 
     context.user_data[WAITING_WELCOME_MEDIA_KEY] = None
-    await message.reply_text("✅ ذخیره شد.")
+    await message.reply_text("✔ ذخیره شد.")
     return True
 
 
@@ -260,5 +260,5 @@ async def clear_welcome_media_cb(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     db.clear_welcome_media(chat_id)
-    await query.answer("حذف شد ✅")
+    await query.answer("حذف شد ✘")
     await open_welcome_panel(update, context)
