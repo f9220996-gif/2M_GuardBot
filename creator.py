@@ -13,11 +13,15 @@ from config import CREATOR_ID
 async def open_creator_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """پنل ویژه سازنده"""
     query = update.callback_query
-    await query.answer()
+    if query:
+        await query.answer()
     
     user = update.effective_user
     if user.id != CREATOR_ID:
-        await query.edit_message_text("⛔️ این پنل فقط برای سازنده ربات است.")
+        if query:
+            await query.edit_message_text("⛔️ این پنل فقط برای سازنده ربات است.")
+        else:
+            await update.effective_message.reply_text("⛔️ این پنل فقط برای سازنده ربات است.")
         return
     
     # دریافت وضعیت‌ها
@@ -50,7 +54,10 @@ async def open_creator_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ],
     ])
     
-    await query.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+    if query:
+        await query.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+    else:
+        await update.effective_message.reply_text(text, reply_markup=kb, parse_mode="Markdown")
 
 
 async def toggle_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -84,7 +91,7 @@ async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
     ])
     # ========================
     
-    # ===== ویرایش پیام فعلی، نه ارسال پیام جدید =====
+    # ===== ویرایش پیام فعلی =====
     await query.edit_message_text(
         "📝 **تغییر پیام خاموشی**\n\n"
         "لطفاً متن جدید پیام خاموشی را ارسال کنید.\n"
@@ -93,7 +100,7 @@ async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=kb,
         parse_mode="Markdown"
     )
-    # ================================================
+    # =============================
     
     context.user_data["waiting_for_shutdown_text"] = True
 
@@ -118,8 +125,9 @@ async def receive_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
     
     # ===== بعد از تغییر، برگرد به پنل سازنده =====
     await update.effective_message.reply_text("✔ پیام خاموشی با موفقیت تغییر کرد!")
+    # ===== ارسال مجدد پنل سازنده =====
     await open_creator_panel(update, context)
-    # =============================================
+    # ================================
     
     return True
 
@@ -142,7 +150,7 @@ async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ])
     # ========================
     
-    # ===== ویرایش پیام فعلی، نه ارسال پیام جدید =====
+    # ===== ویرایش پیام فعلی =====
     await query.edit_message_text(
         "📝 **تغییر پیام آپدیت**\n\n"
         "لطفاً متن جدید پیام آپدیت را ارسال کنید.\n"
@@ -151,7 +159,7 @@ async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=kb,
         parse_mode="Markdown"
     )
-    # ================================================
+    # =============================
     
     context.user_data["waiting_for_update_msg"] = True
 
@@ -176,8 +184,9 @@ async def receive_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     # ===== بعد از تغییر، برگرد به پنل سازنده =====
     await update.effective_message.reply_text("✔ پیام آپدیت با موفقیت تغییر کرد!")
+    # ===== ارسال مجدد پنل سازنده =====
     await open_creator_panel(update, context)
-    # =============================================
+    # ================================
     
     return True
 
@@ -202,4 +211,4 @@ async def show_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 **پیام آپدیت فعلی:**\n\n{msg}",
         reply_markup=kb,
         parse_mode="Markdown"
-)
+        )
