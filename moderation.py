@@ -47,7 +47,7 @@ async def cmd_khamoshi(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ChatPermissions(can_send_messages=False)
         )
     except Exception as e:
-        await _reply(update, f"❌ نتونستم گروه رو قفل کنم. مطمئن شو ربات ادمینه.\n{e}")
+        await _reply(update, f"✘ نتونستم گروه رو قفل کنم. مطمئن شو ربات ادمینه.\n{e}")
         return
 
     if duration:
