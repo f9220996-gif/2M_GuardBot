@@ -108,7 +108,7 @@ async def receive_warn_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data[WAITING_WARN_TEXT_KEY] = None
     new_text = update.effective_message.text
     db.set_warning_text(chat_id, level, text=new_text)
-    await update.effective_message.reply_text(f"✅ متن اخطار سطح {level} ذخیره شد.")
+    await update.effective_message.reply_text(f"✔ متن اخطار سطح {level} ذخیره شد.")
     return True
 
 
@@ -152,7 +152,7 @@ async def receive_warn_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return True
 
     context.user_data[WAITING_WARN_MEDIA_KEY] = None
-    await message.reply_text("✅ ذخیره شد.")
+    await message.reply_text("✔ ذخیره شد.")
     return True
 
 
@@ -167,5 +167,5 @@ async def reset_warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db.reset_warning_text(chat_id, level)
-    await query.answer("بازنشانی شد ✅")
+    await query.answer("بازنشانی شد ✔")
     await open_level_panel(update, context)
