@@ -482,7 +482,6 @@ def remove_bad_word(chat_id, word):
 
 # ===== تنظیمات کلی =====
 def get_setting(key, default=None):
-    """دریافت یک مقدار از دیتابیس"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute("SELECT value FROM bot_settings WHERE key=?", (key,))
@@ -491,7 +490,6 @@ def get_setting(key, default=None):
 
 
 def set_setting(key, value):
-    """ذخیره یک مقدار در دیتابیس"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute(
@@ -502,7 +500,6 @@ def set_setting(key, value):
 
 
 def get_all_keys():
-    """دریافت همه کلیدهای دیتابیس"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute("SELECT key FROM bot_settings")
@@ -568,7 +565,6 @@ TOGGLEABLE_FEATURES = {
     "documents": "ارسال فایل",
     "date": "دستور تاریخ",
     "dollar": "دستور دلار",
-    "ai_moderation": "🤖 AI Moderation",
 }
 
 
@@ -758,7 +754,6 @@ def get_last_message_id(chat_id):
 
 
 def get_cleanup_settings(chat_id):
-    """برمی‌گردونه (enabled, interval_seconds, count, last_cleanup_ts)"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute(
@@ -823,4 +818,4 @@ def set_image_lang(chat_id, lang_code):
             "INSERT INTO bot_settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (f"img_lang_{chat_id}", lang_code)
-        )
+)
