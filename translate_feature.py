@@ -61,7 +61,7 @@ async def cmd_tarjome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         translated = translate_text(source_text, target_lang)
     except Exception as e:
-        await message.reply_text(f"❌ ترجمه انجام نشد.\n{e}")
+        await message.reply_text(f"✘ ترجمه انجام نشد.\n{e}")
         return
 
     await message.reply_text(f"🌐 ترجمه ({LANGUAGES.get(target_lang, target_lang)}):\n{translated}")
@@ -86,7 +86,7 @@ async def check_dot_translate(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         translated = translate_text(to_translate, target_lang)
     except Exception as e:
-        await message.reply_text(f"❌ ترجمه انجام نشد.\n{e}")
+        await message.reply_text(f"✔ ترجمه انجام نشد.\n{e}")
         return True
 
     await message.reply_text(f"🌐 ترجمه ({LANGUAGES.get(target_lang, target_lang)}):\n{translated}")
@@ -117,7 +117,7 @@ async def open_translate_panel(update: Update, context: ContextTypes.DEFAULT_TYP
     rows = []
     line = []
     for code, name in LANGUAGES.items():
-        mark = "✅ " if code == current else ""
+        mark = "✔ " if code == current else ""
         line.append(InlineKeyboardButton(f"{mark}{name}", callback_data=f"tr_set:{chat_id}:{code}"))
         if len(line) == 2:
             rows.append(line)
@@ -143,5 +143,5 @@ async def set_translate_lang_cb(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     db.set_translate_lang(chat_id, code)
-    await query.answer("ذخیره شد ✅")
+    await query.answer("ذخیره شد ✔")
     await open_translate_panel(update, context)
