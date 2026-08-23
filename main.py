@@ -54,9 +54,9 @@ from translate_feature import (
     cmd_tarjome, check_dot_translate, open_translate_panel, set_translate_lang_cb
 )
 from cleanup import (
-    open_cleanup_panel, toggle_cleanup, set_cleanup_count, set_cleanup_days,
+    open_cleanup_panel, toggle_cleanup, 
     track_last_message, run_auto_cleanup_job, ask_interval, adjust_interval, run_cleanup_now,
-    adjust_count
+    adjust_count, set_cleanup_count
 )
 from nav import track_nav_state, handle_back_step
 from image_lang import open_image_lang_panel, set_image_lang_cb
