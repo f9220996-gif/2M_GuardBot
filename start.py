@@ -53,26 +53,29 @@ async def send_start_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     bot_username = (await context.bot.get_me()).username
     
+    # ===== حذف پیام قبلی (اگر وجود داشته باشد) =====
+    try:
+        await update.effective_message.delete()
+    except Exception:
+        pass
+    # ================================================
+    
     # ===== چک کردن اولین بار =====
     is_first_time = db.get_setting(f"first_start_{user.id}", "true") == "true"
     # =============================
     
     if is_first_time:
-        # ===== پیام خوش‌آمدگویی برای اولین بار =====
         db.set_setting(f"first_start_{user.id}", "false")
         await update.effective_message.reply_text(
             WELCOME_TEXT,
             reply_markup=build_start_keyboard(user.id, bot_username),
             parse_mode="Markdown"
         )
-        # ==========================================
     else:
-        # ===== فقط پنل اصلی (بدون پیام خوش‌آمدگویی) =====
         await update.effective_message.reply_text(
             START_TEXT,
             reply_markup=build_start_keyboard(user.id, bot_username)
         )
-        # ================================================
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
