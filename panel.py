@@ -167,7 +167,7 @@ async def toggle_lock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         db.set_group_lock(chat_id, True, None)
-        await query.answer("گروه قفل شد ✅")
+        await query.answer("گروه قفل شد ✔")
     else:
         try:
             await context.bot.set_chat_permissions(
@@ -184,7 +184,7 @@ async def toggle_lock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for job in context.job_queue.get_jobs_by_name(f"unlock_{chat_id}"):
             job.schedule_removal()
         db.set_group_lock(chat_id, False, None)
-        await query.answer("گروه باز شد ✅")
+        await query.answer("گروه باز شد ✔")
 
     group = db.get_group(chat_id)
     text = (
@@ -206,7 +206,7 @@ async def toggle_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db.set_group_active(chat_id, action == "grp_active_on")
-    await query.answer("ذخیره شد ✅")
+    await query.answer("ذخیره شد ✔")
     await show_my_groups(update, context)
 
 
@@ -330,7 +330,7 @@ async def release_mute_from_panel(update: Update, context: ContextTypes.DEFAULT_
     except Exception:
         pass
     db.remove_mute(chat_id, target_id)
-    await query.answer("آزاد شد ✅")
+    await query.answer("آزاد شد ✔")
 
     rows = db.get_active_mutes(chat_id)
     if not rows:
@@ -407,7 +407,7 @@ async def set_mute_duration_from_panel(update: Update, context: ContextTypes.DEF
     except Exception:
         pass
     db.update_mute_duration(chat_id, target_id, until_ts)
-    await query.answer("مدت زمان ذخیره شد ✅")
+    await query.answer("مدت زمان ذخیره شد ✔")
     await _render_mute_detail(query, chat_id, target_id)
 
 
@@ -442,7 +442,7 @@ def _build_features_keyboard(chat_id):
     """چیدمان دستی و بالانس: بلک‌لیست (به‌خاطر متن طولانی) تنها تو یه ردیف، بقیه دوتا-دوتا"""
     def btn(key):
         enabled = db.is_feature_enabled(chat_id, key)
-        icon = "✅" if enabled else "❌"
+        icon = "✔" if enabled else "✘"
         return InlineKeyboardButton(f"{icon} {db.TOGGLEABLE_FEATURES[key]}", callback_data=f"feat_toggle:{chat_id}:{key}")
 
     rows_kb = [
@@ -487,7 +487,7 @@ async def toggle_feature(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_state = not current
     db.set_feature_enabled(chat_id, feature_key, new_state)
 
-    await query.answer("روشن شد ✅" if new_state else "خاموش شد ❌")
+    await query.answer("روشن شد ✔" if new_state else "خاموش شد ❌")
     await query.edit_message_text(
         "🧩 روشن/خاموش قابلیت‌ها\n\nروی هرکدوم بزن تا عوض بشه. برای غیرمدیران: خاموش = پاک + پیام هشدار.",
         reply_markup=_build_features_keyboard(chat_id)
@@ -598,7 +598,7 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
         db.add_mute(chat_id, target_id, target_name, "اقدام بر اساس گزارش عضو", True, until_ts)
-        await query.answer("سکوت ۱۰ دقیقه‌ای اعمال شد ✅")
+        await query.answer("سکوت ۱۰ دقیقه‌ای اعمال شد ✔")
 
     elif action == "ban":
         try:
@@ -606,12 +606,12 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
         db.add_ban(chat_id, target_id, target_name, "اقدام بر اساس گزارش عضو", True)
-        await query.answer("بن شد ✅")
+        await query.answer("بن شد ✔")
 
     elif action == "warn":
         level = db.get_active_warning_count(chat_id, target_id) + 1
         db.add_warning(chat_id, target_id, target_name, "اقدام بر اساس گزارش عضو", level)
-        await query.answer(f"اخطار سطح {level} ثبت شد ✅")
+        await query.answer(f"اخطار سطح {level} ثبت شد ✔")
 
     await open_report_detail(update, context)
 
@@ -626,5 +626,5 @@ async def clear_reports_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db.clear_reports(chat_id)
-    await query.answer("پاک شد ✅")
+    await query.answer("پاک شد ✔")
     await show_reports_list(update, context)
