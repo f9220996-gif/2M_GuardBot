@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 لایه دیتابیس ربات (SQLite)
-همه‌ی عملیات خواندن/نوشتن اطلاعات گروه‌ها، بن‌شده‌ها، سکوت‌ها، اخطارها،
-لیست سیاه گیف/استیکر و تنظیمات ربات از همین‌جا انجام می‌شود.
 """
 
 import sqlite3
@@ -26,7 +24,6 @@ def get_conn():
 
 
 def init_db():
-    """ساخت جدول‌ها در اولین اجرا"""
     with get_conn() as conn:
         c = conn.cursor()
 
@@ -177,13 +174,11 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-        # مقداردهی اولیه کلمات بد سراسری
         c.execute("SELECT COUNT(*) as cnt FROM bad_words WHERE chat_id IS NULL")
         if c.fetchone()["cnt"] == 0:
             for w in DEFAULT_BAD_WORDS:
                 c.execute("INSERT INTO bad_words (chat_id, word) VALUES (NULL, ?)", (w,))
 
-        # مقداردهی اولیه متن اخطارها
         c.execute("SELECT COUNT(*) as cnt FROM warning_texts WHERE chat_id IS NULL")
         if c.fetchone()["cnt"] == 0:
             for lvl, txt in DEFAULT_WARNING_TEXTS.items():
@@ -192,7 +187,6 @@ def init_db():
                     (lvl, txt)
                 )
 
-        # تنظیمات پیش‌فرض ربات
         c.execute("SELECT value FROM bot_settings WHERE key = 'global_active'")
         if c.fetchone() is None:
             c.execute("INSERT INTO bot_settings (key, value) VALUES ('global_active', '1')")
@@ -204,10 +198,7 @@ def init_db():
             )
 
 
-# ---------------------------------------------------------------------------
-# گروه‌ها
-# ---------------------------------------------------------------------------
-
+# ===== گروه‌ها =====
 def upsert_group(chat_id, title, added_by_user_id=None, added_by_username=None):
     with get_conn() as conn:
         c = conn.cursor()
@@ -259,10 +250,7 @@ def set_group_active(chat_id, active: bool):
         c.execute("UPDATE groups SET is_active=? WHERE chat_id=?", (1 if active else 0, chat_id))
 
 
-# ---------------------------------------------------------------------------
-# اخطارها
-# ---------------------------------------------------------------------------
-
+# ===== اخطارها =====
 def add_warning(chat_id, user_id, username, reason, level):
     with get_conn() as conn:
         c = conn.cursor()
@@ -355,10 +343,7 @@ def reset_warning_text(chat_id, level):
         c.execute("DELETE FROM warning_texts WHERE chat_id=? AND level=?", (chat_id, level))
 
 
-# ---------------------------------------------------------------------------
-# سکوت (Mute)
-# ---------------------------------------------------------------------------
-
+# ===== سکوت =====
 def add_mute(chat_id, user_id, username, reason, has_reason, until_at):
     with get_conn() as conn:
         c = conn.cursor()
@@ -412,10 +397,7 @@ def is_muted(chat_id, user_id):
         return c.fetchone()
 
 
-# ---------------------------------------------------------------------------
-# بن (Ban)
-# ---------------------------------------------------------------------------
-
+# ===== بن =====
 def add_ban(chat_id, user_id, username, reason, has_reason):
     with get_conn() as conn:
         c = conn.cursor()
@@ -439,10 +421,7 @@ def unban_record(chat_id, user_id):
         c.execute("UPDATE bans SET active=0 WHERE chat_id=? AND user_id=? AND active=1", (chat_id, user_id))
 
 
-# ---------------------------------------------------------------------------
-# لیست سیاه گیف / استیکر
-# ---------------------------------------------------------------------------
-
+# ===== لیست سیاه =====
 def add_blacklist_gif(chat_id, file_unique_id):
     with get_conn() as conn:
         c = conn.cursor()
@@ -481,10 +460,7 @@ def is_sticker_blacklisted(chat_id, file_unique_id):
         return c.fetchone() is not None
 
 
-# ---------------------------------------------------------------------------
-# کلمات بد
-# ---------------------------------------------------------------------------
-
+# ===== کلمات بد =====
 def get_bad_words(chat_id):
     with get_conn() as conn:
         c = conn.cursor()
@@ -504,10 +480,7 @@ def remove_bad_word(chat_id, word):
         c.execute("DELETE FROM bad_words WHERE word=? AND (chat_id=? OR chat_id IS NULL)", (word, chat_id))
 
 
-# ---------------------------------------------------------------------------
-# تنظیمات کلی ربات
-# ---------------------------------------------------------------------------
-
+# ===== تنظیمات کلی =====
 def get_setting(key, default=None):
     with get_conn() as conn:
         c = conn.cursor()
@@ -542,10 +515,7 @@ def set_shutdown_message(text):
     set_setting("shutdown_message", text)
 
 
-# ---------------------------------------------------------------------------
-# مدیران اضافه
-# ---------------------------------------------------------------------------
-
+# ===== مدیران اضافه =====
 def grant_admin_extra_permission(chat_id, user_id, granted_by):
     with get_conn() as conn:
         c = conn.cursor()
@@ -577,10 +547,7 @@ def has_admin_extra_permission(chat_id, user_id):
         return bool(row and row["can_manage_other_admins"])
 
 
-# ---------------------------------------------------------------------------
-# قابلیت‌های هر گروه
-# ---------------------------------------------------------------------------
-
+# ===== قابلیت‌ها =====
 TOGGLEABLE_FEATURES = {
     "bad_words": "فیلتر فحش",
     "games": "بازی‌ها",
@@ -616,10 +583,7 @@ def set_feature_enabled(chat_id, feature_key, enabled: bool):
         )
 
 
-# ---------------------------------------------------------------------------
-# گزارش‌ها
-# ---------------------------------------------------------------------------
-
+# ===== گزارش‌ها =====
 def add_report(chat_id, reporter_id, reporter_username, reported_user_id, reported_username, message_snippet):
     with get_conn() as conn:
         c = conn.cursor()
@@ -674,10 +638,7 @@ def clear_reports(chat_id):
         c.execute("DELETE FROM reports WHERE chat_id=?", (chat_id,))
 
 
-# ---------------------------------------------------------------------------
-# خوش‌آمدگویی
-# ---------------------------------------------------------------------------
-
+# ===== خوش‌آمدگویی =====
 DEFAULT_WELCOME_TEXT = "🌼 {user} عزیز، به گروه {group} خوش اومدی!\nامیدواریم لحظات خوبی رو اینجا بگذرونی."
 
 
@@ -748,10 +709,7 @@ def clear_welcome_media(chat_id):
         )
 
 
-# ---------------------------------------------------------------------------
-# ترجمه
-# ---------------------------------------------------------------------------
-
+# ===== ترجمه =====
 def get_translate_lang(chat_id, default="fa"):
     with get_conn() as conn:
         c = conn.cursor()
@@ -770,10 +728,7 @@ def set_translate_lang(chat_id, lang_code):
         )
 
 
-# ---------------------------------------------------------------------------
-# پاک‌سازی خودکار
-# ---------------------------------------------------------------------------
-
+# ===== پاک‌سازی خودکار (جدید) =====
 def update_last_message_id(chat_id, message_id):
     with get_conn() as conn:
         c = conn.cursor()
@@ -793,31 +748,32 @@ def get_last_message_id(chat_id):
 
 
 def get_cleanup_settings(chat_id):
+    """برمی‌گردونه (enabled, interval_seconds, count, last_cleanup_ts)"""
     with get_conn() as conn:
         c = conn.cursor()
         c.execute(
             "SELECT key, value FROM bot_settings WHERE key IN (?, ?, ?, ?)",
-            (f"cleanup_on_{chat_id}", f"cleanup_days_{chat_id}",
+            (f"cleanup_on_{chat_id}", f"cleanup_interval_{chat_id}",
              f"cleanup_count_{chat_id}", f"cleanup_last_{chat_id}")
         )
         vals = {row["key"]: row["value"] for row in c.fetchall()}
         enabled = vals.get(f"cleanup_on_{chat_id}") == "1"
-        interval_days = int(vals.get(f"cleanup_days_{chat_id}", "1"))
+        interval_seconds = int(vals.get(f"cleanup_interval_{chat_id}", "86400"))  # پیش‌فرض ۱ روز
         count = int(vals.get(f"cleanup_count_{chat_id}", "20"))
         last_ts = float(vals.get(f"cleanup_last_{chat_id}", "0"))
-        return enabled, interval_days, count, last_ts
+        return enabled, interval_seconds, count, last_ts
 
 
-def set_cleanup_settings(chat_id, enabled=None, interval_days=None, count=None, last_ts=None):
+def set_cleanup_settings(chat_id, enabled=None, interval_seconds=None, count=None, last_ts=None):
     with get_conn() as conn:
         c = conn.cursor()
         updates = []
         if enabled is not None:
             updates.append((f"cleanup_on_{chat_id}", "1" if enabled else "0"))
-        if interval_days is not None:
-            updates.append((f"cleanup_days_{chat_id}", str(interval_days)))
+        if interval_seconds is not None:
+            updates.append((f"cleanup_interval_{chat_id}", str(max(60, interval_seconds))))  # حداقل ۱ دقیقه
         if count is not None:
-            updates.append((f"cleanup_count_{chat_id}", str(count)))
+            updates.append((f"cleanup_count_{chat_id}", str(max(1, count))))
         if last_ts is not None:
             updates.append((f"cleanup_last_{chat_id}", str(last_ts)))
         for key, value in updates:
@@ -841,10 +797,7 @@ def get_all_cleanup_enabled_chats():
         return chat_ids
 
 
-# ---------------------------------------------------------------------------
-# زبان عکس قیمت‌ها
-# ---------------------------------------------------------------------------
-
+# ===== زبان عکس قیمت‌ها =====
 def get_image_lang(chat_id, default="fa"):
     with get_conn() as conn:
         c = conn.cursor()
@@ -860,4 +813,4 @@ def set_image_lang(chat_id, lang_code):
             "INSERT INTO bot_settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (f"img_lang_{chat_id}", lang_code)
-        )
+    )
