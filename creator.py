@@ -84,6 +84,7 @@ async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
     ])
     # ========================
     
+    # ===== ویرایش پیام فعلی، نه ارسال پیام جدید =====
     await query.edit_message_text(
         "📝 **تغییر پیام خاموشی**\n\n"
         "لطفاً متن جدید پیام خاموشی را ارسال کنید.\n"
@@ -92,6 +93,8 @@ async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=kb,
         parse_mode="Markdown"
     )
+    # ================================================
+    
     context.user_data["waiting_for_shutdown_text"] = True
 
 
@@ -112,7 +115,12 @@ async def receive_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
     
     db.set_shutdown_message(text)
     context.user_data["waiting_for_shutdown_text"] = False
+    
+    # ===== بعد از تغییر، برگرد به پنل سازنده =====
     await update.effective_message.reply_text("✔ پیام خاموشی با موفقیت تغییر کرد!")
+    await open_creator_panel(update, context)
+    # =============================================
+    
     return True
 
 
@@ -134,6 +142,7 @@ async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ])
     # ========================
     
+    # ===== ویرایش پیام فعلی، نه ارسال پیام جدید =====
     await query.edit_message_text(
         "📝 **تغییر پیام آپدیت**\n\n"
         "لطفاً متن جدید پیام آپدیت را ارسال کنید.\n"
@@ -142,6 +151,8 @@ async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=kb,
         parse_mode="Markdown"
     )
+    # ================================================
+    
     context.user_data["waiting_for_update_msg"] = True
 
 
@@ -162,7 +173,12 @@ async def receive_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     db.set_setting("update_message", text)
     context.user_data["waiting_for_update_msg"] = False
+    
+    # ===== بعد از تغییر، برگرد به پنل سازنده =====
     await update.effective_message.reply_text("✔ پیام آپدیت با موفقیت تغییر کرد!")
+    await open_creator_panel(update, context)
+    # =============================================
+    
     return True
 
 
@@ -186,4 +202,4 @@ async def show_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 **پیام آپدیت فعلی:**\n\n{msg}",
         reply_markup=kb,
         parse_mode="Markdown"
-    )
+)
