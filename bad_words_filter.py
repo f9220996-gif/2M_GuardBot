@@ -47,7 +47,7 @@ async def _delete_message_later(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """این تابع روی هر پیام متنی گروه اجرا می‌شود (باید در main.py رجیستر شود)"""
+    """این تابع روی هر پیام متنی گروه اجرا می‌شود"""
     message = update.effective_message
     chat = update.effective_chat
     user = update.effective_user
@@ -57,10 +57,9 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
     if not user or user.is_bot:
         return
 
-    # ===== اگر AI Moderation روشن باشه، این فیلتر اجرا نشه =====
-    if db.is_feature_enabled(chat.id, "ai_moderation"):
-        return
-    # ===========================================================
+    # ===== حذف چک ai_moderation =====
+    # فیلتر فحش همیشه طبق تنظیمات گروه کار میکنه
+    # ===============================
 
     group = db.get_group(chat.id)
     if group and not group["is_active"]:
@@ -100,7 +99,7 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
             f"⚠️ {username}\n{text_out}",
             reply_to_message_id=None,
         )
-        # این پیام اخطار بعد از ۱ دقیقه خودکار پاک می‌شود تا گروه شلوغ نشود
+        # این پیام اخطار بعد از ۱ دقیقه خودکار پاک می‌شود
         context.job_queue.run_once(
             _delete_message_later, when=60,
             data={"chat_id": chat.id, "message_id": warning_msg.message_id},
@@ -143,7 +142,6 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
             f"به دلیل تکرار بی‌ادبی، سکوت {which} فعال شد.\n"
             f"{build_restriction_message(until_dt_display, chat.title)}"
         )
-        # این پیام تا زمانی که خودِ سکوت تموم بشه می‌مونه، بعدش خودکار پاک می‌شه
         context.job_queue.run_once(
             _delete_message_later, when=minutes * 60,
             data={"chat_id": chat.id, "message_id": mute_msg.message_id},
@@ -159,4 +157,4 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
         await context.bot.send_message(
             chat.id,
             f"⛔️ {username}\nبه دلیل تکرار سه‌باره بی‌ادبی، به‌صورت کامل از گروه بن شد."
-        )
+    )
