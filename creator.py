@@ -78,11 +78,18 @@ async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer("⛔️ فقط سازنده", show_alert=True)
         return
     
+    # ===== دکمه بازگشت =====
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ بازگشت", callback_data="creator_panel_open")]
+    ])
+    # ========================
+    
     await query.edit_message_text(
         "📝 **تغییر پیام خاموشی**\n\n"
         "لطفاً متن جدید پیام خاموشی را ارسال کنید.\n"
         "این پیام زمانی که ربات خاموش است به کاربران نمایش داده می‌شود.\n\n"
         "برای لغو، دستور /cancel را بفرستید.",
+        reply_markup=kb,
         parse_mode="Markdown"
     )
     context.user_data["waiting_for_shutdown_text"] = True
@@ -121,11 +128,18 @@ async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("⛔️ فقط سازنده", show_alert=True)
         return
     
+    # ===== دکمه بازگشت =====
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ بازگشت", callback_data="creator_panel_open")]
+    ])
+    # ========================
+    
     await query.edit_message_text(
         "📝 **تغییر پیام آپدیت**\n\n"
         "لطفاً متن جدید پیام آپدیت را ارسال کنید.\n"
         "این پیام زمانی که ربات آپدیت می‌شود به مدیران گروه نمایش داده می‌شود.\n\n"
         "برای لغو، دستور /cancel را بفرستید.",
+        reply_markup=kb,
         parse_mode="Markdown"
     )
     context.user_data["waiting_for_update_msg"] = True
