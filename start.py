@@ -25,6 +25,16 @@ START_TEXT = (
     "همین حالا ربات را به گروه خود اضافه کنید! 🎯"
 )
 
+WELCOME_TEXT = (
+    "🎉 **به ربات مدیریت گروه خوش آمدید!**\n\n"
+    "من اینجا هستم تا به شما در مدیریت گروه‌های تلگرام کمک کنم.\n\n"
+    "✅ با استفاده از دکمه‌های زیر می‌توانید:\n"
+    "• گروه‌های خود را مدیریت کنید\n"
+    "• از هوش مصنوعی کمک بگیرید\n"
+    "• با پشتیبانی تماس بگیرید\n\n"
+    "🌟 **نکته:** ربات را در گروه خود ادمین کامل کنید تا همه قابلیت‌ها فعال شوند."
+)
+
 def build_start_keyboard(user_id: int, bot_username: str):
     rows = [
         [InlineKeyboardButton("➕ افزودن به گروه", url=f"https://t.me/{bot_username}?startgroup=true&admin=delete_messages+restrict_members+invite_users+pin_messages")],
@@ -42,10 +52,27 @@ def build_start_keyboard(user_id: int, bot_username: str):
 async def send_start_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     bot_username = (await context.bot.get_me()).username
-    await update.effective_message.reply_text(
-        START_TEXT,
-        reply_markup=build_start_keyboard(user.id, bot_username)
-    )
+    
+    # ===== چک کردن اولین بار =====
+    is_first_time = db.get_setting(f"first_start_{user.id}", "true") == "true"
+    # =============================
+    
+    if is_first_time:
+        # ===== پیام خوش‌آمدگویی برای اولین بار =====
+        db.set_setting(f"first_start_{user.id}", "false")
+        await update.effective_message.reply_text(
+            WELCOME_TEXT,
+            reply_markup=build_start_keyboard(user.id, bot_username),
+            parse_mode="Markdown"
+        )
+        # ==========================================
+    else:
+        # ===== فقط پنل اصلی (بدون پیام خوش‌آمدگویی) =====
+        await update.effective_message.reply_text(
+            START_TEXT,
+            reply_markup=build_start_keyboard(user.id, bot_username)
+        )
+        # ================================================
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -56,10 +83,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(db.get_shutdown_message())
         return
     
+    # ===== حذف کیبورد قبلی =====
     await update.effective_message.reply_text(
-        "🤖 خوش آمدید!",
+        "🤖",
         reply_markup=ReplyKeyboardRemove()
     )
+    # ===========================
+    
     await send_start_panel(update, context)
 
 HELP_TEXT = (
@@ -146,9 +176,9 @@ async def ai_use_chatgpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ===== تابع ری‌استارت (اصلاح شده با حذف پیام) =====
+# ===== تابع ری‌استارت =====
 async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ری‌استارت ربات (فقط برای سازنده) - پیام /start مخفی"""
+    """ری‌استارت ربات (فقط برای سازنده)"""
     query = update.callback_query
     await query.answer()
     
@@ -164,13 +194,13 @@ async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     # ===================================
     
-    # ===== ارسال /start به صورت مخفی (بدون دیده شدن) =====
+    # ===== ارسال پنل اصلی =====
     await update.effective_message.reply_text(
         "🤖 خوش آمدید!",
         reply_markup=ReplyKeyboardRemove()
     )
     await send_start_panel(update, context)
-    # =====================================================
+    # ===========================
     
     # ===== ری‌استارت واقعی در پس‌زمینه =====
     try:
