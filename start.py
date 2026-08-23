@@ -146,9 +146,9 @@ async def ai_use_chatgpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ===== تابع ری‌استارت (اصلاح شده) =====
+# ===== تابع ری‌استارت (اصلاح شده با حذف پیام) =====
 async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ری‌استارت ربات (فقط برای سازنده)"""
+    """ری‌استارت ربات (فقط برای سازنده) - پیام /start مخفی"""
     query = update.callback_query
     await query.answer()
     
@@ -157,16 +157,25 @@ async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✘ فقط سازنده ربات می‌تونه ری‌استارت کنه.")
         return
     
-    await query.edit_message_text("🔄 ربات در حال ری‌استارت...")
-    
-    # ===== ری‌استارت واقعی با استفاده از sys.exit و os.execv =====
+    # ===== حذف پیام دکمه ری‌استارت =====
     try:
-        # ذخیره تغییرات دیتابیس
-        db.set_setting("restart_flag", "true")
-        
-        # خروج از برنامه و راه‌اندازی مجدد
+        await query.message.delete()
+    except Exception:
+        pass
+    # ===================================
+    
+    # ===== ارسال /start به صورت مخفی (بدون دیده شدن) =====
+    await update.effective_message.reply_text(
+        "🤖 خوش آمدید!",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await send_start_panel(update, context)
+    # =====================================================
+    
+    # ===== ری‌استارت واقعی در پس‌زمینه =====
+    try:
         python = sys.executable
         os.execl(python, python, *sys.argv)
     except Exception as e:
-        await query.edit_message_text(f"❌ خطا در ری‌استارت: {e}")
-    # ============================================================
+        await update.effective_message.reply_text(f"❌ خطا در ری‌استارت: {e}")
+    # ========================================
