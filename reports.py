@@ -34,7 +34,7 @@ async def cmd_gozaresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_report(chat.id, user.id, reporter_name, reported.id, reported_name, snippet)
 
     try:
-        await message.reply_text("✅ گزارش شما ثبت شد و به مالک گروه اطلاع داده می‌شود.")
+        await message.reply_text("✔ گزارش شما ثبت شد و به مالک گروه اطلاع داده می‌شود.")
     except Exception:
         pass
 
