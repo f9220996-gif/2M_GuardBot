@@ -65,6 +65,12 @@ from image_lang import open_image_lang_panel, set_image_lang_cb
 # ===== هوش مصنوعی =====
 from ai_simple import ai_handler, ai_private_chat
 
+# ===== پشتیبانی =====
+from support import (
+    support_menu, receive_support_message, confirm_support, cancel_support,
+    support_admin_panel, show_support_message, support_reply, send_support_reply, support_delete
+)
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -360,6 +366,17 @@ def main():
     
     # ===== دکمه ری‌استارت =====
     app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
+
+    # ===== پشتیبانی =====
+    app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
+    app.add_handler(CallbackQueryHandler(confirm_support, pattern="^support_confirm:"))
+    app.add_handler(CallbackQueryHandler(cancel_support, pattern="^support_cancel$"))
+    app.add_handler(CallbackQueryHandler(support_admin_panel, pattern="^support_admin$"))
+    app.add_handler(CallbackQueryHandler(show_support_message, pattern="^support_show:"))
+    app.add_handler(CallbackQueryHandler(support_reply, pattern="^support_reply:"))
+    app.add_handler(CallbackQueryHandler(support_delete, pattern="^support_delete:"))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.TEXT | filters.PHOTO), receive_support_message))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, send_support_reply))
 
     # ===== Jobها =====
     app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
