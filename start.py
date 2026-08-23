@@ -3,6 +3,8 @@
 پیام /start در پی‌وی ربات + دکمه‌های شیشه‌ای (Inline Keyboard)
 """
 
+import os
+import sys
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 import database as db
@@ -30,14 +32,10 @@ def build_start_keyboard(user_id: int, bot_username: str):
     ]
     if user_id == CREATOR_ID:
         rows.append([InlineKeyboardButton("👑 پنل ویژه سازنده", callback_data="creator_panel_open")])
-    
-    # ===== دکمه‌های هوش مصنوعی و پشتیبانی کنار هم =====
     rows.append([
         InlineKeyboardButton("🧠 هوش مصنوعی", callback_data="ai_model_select"),
         InlineKeyboardButton("📩 پشتیبانی", callback_data="support_menu"),
     ])
-    # ================================================
-    
     rows.append([InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
     return InlineKeyboardMarkup(rows)
 
@@ -148,7 +146,9 @@ async def ai_use_chatgpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+# ===== تابع ری‌استارت (اصلاح شده) =====
 async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ری‌استارت ربات (فقط برای سازنده)"""
     query = update.callback_query
     await query.answer()
     
@@ -159,6 +159,14 @@ async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text("🔄 ربات در حال ری‌استارت...")
     
-    import sys
-    import os
-    os.execv(sys.executable, ['python'] + sys.argv)
+    # ===== ری‌استارت واقعی با استفاده از sys.exit و os.execv =====
+    try:
+        # ذخیره تغییرات دیتابیس
+        db.set_setting("restart_flag", "true")
+        
+        # خروج از برنامه و راه‌اندازی مجدد
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+    except Exception as e:
+        await query.edit_message_text(f"❌ خطا در ری‌استارت: {e}")
+    # ============================================================
