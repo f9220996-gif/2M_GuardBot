@@ -36,7 +36,8 @@ from panel import (
     open_report_detail, handle_report_action
 )
 from creator import (
-    open_creator_panel, toggle_global, ask_set_shutdown_text, receive_shutdown_text
+    open_creator_panel, toggle_global, ask_set_shutdown_text, receive_shutdown_text,
+    ask_set_update_msg, receive_update_msg, show_update_msg
 )
 from reports import cmd_gozaresh, send_pending_reports_job
 from persian_date import cmd_tarikh
@@ -224,6 +225,9 @@ def main():
         consumed = await receive_shutdown_text(update, context)
         if consumed:
             return
+        consumed = await receive_update_msg(update, context)
+        if consumed:
+            return
         consumed = await receive_welcome_text(update, context)
         if consumed:
             return
@@ -344,6 +348,10 @@ def main():
     app.add_handler(CallbackQueryHandler(open_creator_panel, pattern="^creator_panel_open$"))
     app.add_handler(CallbackQueryHandler(toggle_global, pattern="^creator_global_(on|off)$"))
     app.add_handler(CallbackQueryHandler(ask_set_shutdown_text, pattern="^creator_set_msg$"))
+    
+    # ===== پنل سازنده (بخش آپدیت) =====
+    app.add_handler(CallbackQueryHandler(ask_set_update_msg, pattern="^creator_set_update_msg$"))
+    app.add_handler(CallbackQueryHandler(show_update_msg, pattern="^creator_show_update_msg$"))
     
     # ===== انتخاب مدل هوش مصنوعی =====
     app.add_handler(CallbackQueryHandler(ai_model_select, pattern="^ai_model_select$"))
