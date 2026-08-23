@@ -16,7 +16,10 @@ from telegram.ext import (
 import database as db
 from config import BOT_TOKEN, CREATOR_ID
 
-from start import cmd_start, on_help_button, send_start_panel, BACK_STEP_BUTTON_TEXT, restart_bot
+from start import (
+    cmd_start, on_help_button, send_start_panel, restart_bot,
+    ai_model_select, ai_use_gemini, ai_use_chatgpt
+)
 from moderation import (
     cmd_khamoshi, cmd_roshan, cmd_sokoot, cmd_azad_kon, cmd_ban_kon,
     cmd_pak, cmd_gif_ban, cmd_sticker_ban, check_blacklisted_media, check_media_permissions
@@ -58,9 +61,7 @@ from nav import track_nav_state, handle_back_step
 from image_lang import open_image_lang_panel, set_image_lang_cb
 
 # ===== هوش مصنوعی =====
-from ai_simple import ai_handler
-from ai_moderation import ai_moderation
-# =====================
+from ai_simple import ai_handler, ai_private_chat
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -142,7 +143,7 @@ async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         await context.bot.send_message(
             chat.id,
-            "✅ ربات با موفقیت اضافه شد!\nبرای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
+            "✔ ربات با موفقیت اضافه شد!\nبرای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
         )
     except Exception:
         pass
@@ -166,7 +167,7 @@ async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TY
         try:
             await context.bot.send_message(
                 chat.id,
-                "✅ ربات با موفقیت اضافه شد!\nبرای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
+                "✔ ربات با موفقیت اضافه شد!\nبرای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
             )
         except Exception:
             pass
@@ -200,7 +201,7 @@ async def global_shutdown_gate(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def main():
     if not BOT_TOKEN or BOT_TOKEN == "PUT_YOUR_BOT_TOKEN_HERE":
-        raise SystemExit("❌ لطفاً اول BOT_TOKEN رو در config.py یا متغیر محیطی ست کنید.")
+        raise SystemExit("✘ لطفاً اول BOT_TOKEN رو در config.py یا متغیر محیطی ست کنید.")
     if not CREATOR_ID:
         logger.warning("⚠️ CREATOR_ID تنظیم نشده — پنل ویژه سازنده کار نخواهد کرد.")
 
@@ -229,9 +230,7 @@ def main():
         if consumed:
             return
         text = (update.effective_message.text or "").strip()
-        if text == BACK_STEP_BUTTON_TEXT:
-            await handle_back_step(update, context)
-        elif text in PRICE_LOOKUP_NAMES:
+        if text in PRICE_LOOKUP_NAMES:
             await cmd_crypto_single(update, context)
         elif text == "رمز ارز":
             await cmd_crypto_all(update, context)
@@ -246,14 +245,14 @@ def main():
         ai_handler
     ), group=0)
 
-    # ===== هوش مصنوعی تشخیص فحش (گروه 1) =====
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
-        ai_moderation
-    ), group=1)
-
     # ===== دستورات =====
     app.add_handler(CommandHandler("start", cmd_start))
+
+    # ===== پی‌وی =====
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+        ai_private_chat
+    ))
 
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, guarded_private_text
@@ -338,6 +337,11 @@ def main():
     app.add_handler(CallbackQueryHandler(open_creator_panel, pattern="^creator_panel_open$"))
     app.add_handler(CallbackQueryHandler(toggle_global, pattern="^creator_global_(on|off)$"))
     app.add_handler(CallbackQueryHandler(ask_set_shutdown_text, pattern="^creator_set_msg$"))
+    
+    # ===== انتخاب مدل هوش مصنوعی =====
+    app.add_handler(CallbackQueryHandler(ai_model_select, pattern="^ai_model_select$"))
+    app.add_handler(CallbackQueryHandler(ai_use_gemini, pattern="^ai_use_gemini$"))
+    app.add_handler(CallbackQueryHandler(ai_use_chatgpt, pattern="^ai_use_chatgpt$"))
     
     # ===== دکمه ری‌استارت =====
     app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
