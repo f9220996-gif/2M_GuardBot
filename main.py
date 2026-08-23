@@ -54,8 +54,9 @@ from translate_feature import (
     cmd_tarjome, check_dot_translate, open_translate_panel, set_translate_lang_cb
 )
 from cleanup import (
-    open_cleanup_panel, toggle_cleanup, set_cleanup_days, set_cleanup_count,
-    track_last_message, run_auto_cleanup_job
+    open_cleanup_panel, toggle_cleanup, set_cleanup_count, set_cleanup_days,
+    track_last_message, run_auto_cleanup_job, ask_interval, adjust_interval, run_cleanup_now,
+    adjust_count
 )
 from nav import track_nav_state, handle_back_step
 from image_lang import open_image_lang_panel, set_image_lang_cb
@@ -325,10 +326,16 @@ def main():
     app.add_handler(CallbackQueryHandler(reset_warn, pattern=r"^warnedit_reset:"))
     app.add_handler(CallbackQueryHandler(open_translate_panel, pattern=r"^tr_panel:"))
     app.add_handler(CallbackQueryHandler(set_translate_lang_cb, pattern=r"^tr_set:"))
+    
+    # ===== پاک‌سازی خودکار =====
     app.add_handler(CallbackQueryHandler(open_cleanup_panel, pattern=r"^cln_panel:"))
-    app.add_handler(CallbackQueryHandler(toggle_cleanup, pattern=r"^cln_(on|off):"))
-    app.add_handler(CallbackQueryHandler(set_cleanup_days, pattern=r"^cln_days:"))
+    app.add_handler(CallbackQueryHandler(toggle_cleanup, pattern=r"^cln_toggle:"))
+    app.add_handler(CallbackQueryHandler(ask_interval, pattern=r"^cln_interval:"))
+    app.add_handler(CallbackQueryHandler(adjust_interval, pattern=r"^cln_adjust:"))
     app.add_handler(CallbackQueryHandler(set_cleanup_count, pattern=r"^cln_count:"))
+    app.add_handler(CallbackQueryHandler(adjust_count, pattern=r"^cln_count_adjust:"))
+    app.add_handler(CallbackQueryHandler(run_cleanup_now, pattern=r"^cln_run:"))
+    
     app.add_handler(CallbackQueryHandler(open_image_lang_panel, pattern=r"^imglang_panel:"))
     app.add_handler(CallbackQueryHandler(set_image_lang_cb, pattern=r"^imglang_set:"))
     app.add_handler(CallbackQueryHandler(ask_add_welcome_media, pattern=r"^wc_media:"))
