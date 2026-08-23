@@ -18,24 +18,19 @@ async def on_new_member_welcome(update: Update, context: ContextTypes.DEFAULT_TY
     if not message or not message.new_chat_members:
         return
     
-    # چک کردن اینکه ربات خاموش نباشه
     if not db.is_global_active():
         return
     
-    # چک کردن فعال بودن خوش‌آمدگویی
     if not db.is_feature_enabled(chat.id, "welcome"):
         return
     
     for new_member in message.new_chat_members:
-        # اگر عضو جدید خود ربات باشه، نادیده بگیر
         me = await context.bot.get_me()
         if new_member.id == me.id:
             return
         
-        # دریافت متن خوش‌آمدگویی
         welcome_text = db.get_welcome_text(chat.id)
         
-        # جایگزین کردن متغیرها
         user_name = new_member.full_name or new_member.username or "کاربر"
         group_name = chat.title or "گروه"
         now = now_tehran()
@@ -47,7 +42,6 @@ async def on_new_member_welcome(update: Update, context: ContextTypes.DEFAULT_TY
         welcome_text = welcome_text.replace("{date}", date_str)
         welcome_text = welcome_text.replace("{time}", time_str)
         
-        # دریافت مدیا (استیکر یا گیف)
         sticker_id, gif_id = db.get_welcome_media(chat.id)
         
         try:
@@ -58,7 +52,6 @@ async def on_new_member_welcome(update: Update, context: ContextTypes.DEFAULT_TY
             
             await context.bot.send_message(chat.id, welcome_text)
         except Exception:
-            # اگر مدیا ارسال نشد، فقط پیام رو بفرست
             try:
                 await context.bot.send_message(chat.id, welcome_text)
             except Exception:
@@ -76,7 +69,6 @@ async def open_welcome_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("✘ شما اجازه ندارید.", show_alert=True)
         return
     
-    # دریافت وضعیت
     enabled = db.is_feature_enabled(chat_id, "welcome")
     welcome_text = db.get_welcome_text(chat_id)
     sticker_id, gif_id = db.get_welcome_media(chat_id)
@@ -199,7 +191,14 @@ async def ask_add_welcome_media(update: Update, context: ContextTypes.DEFAULT_TY
     ])
     # ========================
     
-    await query.edit_message_text(
+    # ===== حذف پیام‌های قبلی =====
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    # =============================
+    
+    await update.effective_message.reply_text(
         "🎬 **افزودن مدیا به خوش‌آمدگویی**\n\n"
         "یک استیکر یا گیف (GIF) برای خوش‌آمدگویی ارسال کنید.\n\n"
         "برای لغو، دستور /cancel را بفرستید.",
@@ -221,6 +220,7 @@ async def receive_welcome_media(update: Update, context: ContextTypes.DEFAULT_TY
         return False
     
     message = update.effective_message
+    msg_id = message.message_id
     
     if message.sticker:
         file_id = message.sticker.file_id
@@ -235,7 +235,21 @@ async def receive_welcome_media(update: Update, context: ContextTypes.DEFAULT_TY
         return True
     
     context.user_data["waiting_for_welcome_media"] = None
+    
+    # ===== حذف پیام‌های قبلی (مدیا و پیام‌های قدیمی) =====
+    try:
+        # حذف پیام مدیا
+        await context.bot.delete_message(chat_id, msg_id)
+        # حذف پیام راهنما (آخرین پیام)
+        # این کار توسط دکمه بازگشت انجام میشه
+    except Exception:
+        pass
+    # =====================================================
+    
+    # ===== ارسال مجدد پنل خوش‌آمدگویی =====
     await open_welcome_panel(update, context)
+    # =====================================
+    
     return True
 
 
@@ -266,11 +280,9 @@ async def preview_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("✘ شما اجازه ندارید.", show_alert=True)
         return
     
-    # دریافت متن و مدیا
     welcome_text = db.get_welcome_text(chat_id)
     sticker_id, gif_id = db.get_welcome_media(chat_id)
     
-    # جایگزین کردن متغیرها با نمونه
     preview_text = welcome_text.replace("{user}", "کاربر نمونه")
     preview_text = preview_text.replace("{group}", "گروه نمونه")
     preview_text = preview_text.replace("{date}", "۱۴۰۴/۰۱/۰۱")
@@ -286,7 +298,7 @@ async def preview_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await context.bot.send_message(chat_id, f"❌ خطا در ارسال پیش‌نمایش: {e}")
     
-    await query.answer("پیش‌نمایش ارسال شد ✅")
+    await query.answer("پیش‌نمایش ارسال شد ✔")
 
 
 async def reset_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
