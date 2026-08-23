@@ -499,6 +499,14 @@ def set_setting(key, value):
         )
 
 
+def get_all_keys():
+    """دریافت همه کلیدهای دیتابیس"""
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("SELECT key FROM bot_settings")
+        return [row["key"] for row in c.fetchall()]
+
+
 def is_global_active():
     return get_setting("global_active", "1") == "1"
 
@@ -728,7 +736,7 @@ def set_translate_lang(chat_id, lang_code):
         )
 
 
-# ===== پاک‌سازی خودکار (جدید) =====
+# ===== پاک‌سازی خودکار =====
 def update_last_message_id(chat_id, message_id):
     with get_conn() as conn:
         c = conn.cursor()
@@ -758,7 +766,7 @@ def get_cleanup_settings(chat_id):
         )
         vals = {row["key"]: row["value"] for row in c.fetchall()}
         enabled = vals.get(f"cleanup_on_{chat_id}") == "1"
-        interval_seconds = int(vals.get(f"cleanup_interval_{chat_id}", "86400"))  # پیش‌فرض ۱ روز
+        interval_seconds = int(vals.get(f"cleanup_interval_{chat_id}", "86400"))
         count = int(vals.get(f"cleanup_count_{chat_id}", "20"))
         last_ts = float(vals.get(f"cleanup_last_{chat_id}", "0"))
         return enabled, interval_seconds, count, last_ts
@@ -771,7 +779,7 @@ def set_cleanup_settings(chat_id, enabled=None, interval_seconds=None, count=Non
         if enabled is not None:
             updates.append((f"cleanup_on_{chat_id}", "1" if enabled else "0"))
         if interval_seconds is not None:
-            updates.append((f"cleanup_interval_{chat_id}", str(max(60, interval_seconds))))  # حداقل ۱ دقیقه
+            updates.append((f"cleanup_interval_{chat_id}", str(max(60, interval_seconds))))
         if count is not None:
             updates.append((f"cleanup_count_{chat_id}", str(max(1, count))))
         if last_ts is not None:
@@ -813,4 +821,13 @@ def set_image_lang(chat_id, lang_code):
             "INSERT INTO bot_settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (f"img_lang_{chat_id}", lang_code)
-    )
+        )
+
+
+# ===== پشتیبانی =====
+def get_all_keys():
+    """دریافت همه کلیدهای دیتابیس"""
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("SELECT key FROM bot_settings")
+        return [row["key"] for row in c.fetchall()]
