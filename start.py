@@ -13,10 +13,10 @@ START_TEXT = (
     "با بهترین ربات مدیریت گروه آشنا شوید\n"
     "دستیار قدرتمند برای نظم و امنیت گروه‌ها\n\n"
     "✨ ویژگی‌های کلیدی\n"
-    "✅ پاسخ سریع  •  ✅ گروه‌های بزرگ\n"
-    "✅ امنیت بالا  •  ✅ ضداسپم\n"
-    "✅ فیلتر کلمات  •  ✅ کنترل دسترسی\n"
-    "✅ قفل حرفه‌ای  •  ✅ پشتیبانی سریع\n\n"
+    "✔ پاسخ سریع  •  ✔ گروه‌های بزرگ\n"
+    "✔ امنیت بالا  •  ✔ ضداسپم\n"
+    "✔ فیلتر کلمات  •  ✔ کنترل دسترسی\n"
+    "✔ قفل حرفه‌ای  •  ✔ پشتیبانی سریع\n\n"
     "🚀 نحوه نصب\n"
     "1️⃣ ربات رو به گروهتون اضافه کنید\n"
     "2️⃣ اون رو ادمین کامل کنید تا فعال بشه\n\n"
@@ -31,7 +31,6 @@ def build_start_keyboard(user_id: int, bot_username: str):
     if user_id == CREATOR_ID:
         rows.append([InlineKeyboardButton("👑 پنل ویژه سازنده", callback_data="creator_panel_open")])
     
-    # دکمه چت با هوش مصنوعی
     rows.append([InlineKeyboardButton("🧠 چت با هوش مصنوعی", callback_data="ai_model_select")])
     rows.append([InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
     return InlineKeyboardMarkup(rows)
@@ -98,7 +97,6 @@ async def on_help_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]])
     await query.message.reply_text(HELP_TEXT, reply_markup=kb, parse_mode="Markdown")
 
-# ===== انتخاب مدل هوش مصنوعی =====
 async def ai_model_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -124,7 +122,7 @@ async def ai_use_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["ai_model"] = "gemini"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]])
     await query.edit_message_text(
-        "✅ **مدل Gemini فعال شد**\n\n"
+        "✔ **مدل Gemini فعال شد**\n\n"
         "حالا می‌توانید سوال خود را بپرسید.\n"
         "برای شروع، پیام خود را ارسال کنید.",
         reply_markup=kb,
@@ -137,27 +135,24 @@ async def ai_use_chatgpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["ai_model"] = "chatgpt"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]])
     await query.edit_message_text(
-        "✅ **مدل ChatGPT فعال شد**\n\n"
+        "✔ **مدل ChatGPT فعال شد**\n\n"
         "حالا می‌توانید سوال خود را بپرسید.\n"
         "برای شروع، پیام خود را ارسال کنید.",
         reply_markup=kb,
         parse_mode="Markdown"
     )
-# =================================
 
 async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ری‌استارت ربات (فقط برای سازنده)"""
     query = update.callback_query
     await query.answer()
     
     user = update.effective_user
     if user.id != CREATOR_ID:
-        await query.edit_message_text("⛔️ فقط سازنده ربات می‌تونه ری‌استارت کنه.")
+        await query.edit_message_text("✘ فقط سازنده ربات می‌تونه ری‌استارت کنه.")
         return
     
     await query.edit_message_text("🔄 ربات در حال ری‌استارت...")
     
-    # ری‌استارت واقعی
     import sys
     import os
     os.execv(sys.executable, ['python'] + sys.argv)
