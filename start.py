@@ -30,8 +30,8 @@ def build_start_keyboard(user_id: int, bot_username: str):
     ]
     if user_id == CREATOR_ID:
         rows.append([InlineKeyboardButton("👑 پنل ویژه سازنده", callback_data="creator_panel_open")])
-    
     rows.append([InlineKeyboardButton("🧠 چت با هوش مصنوعی", callback_data="ai_model_select")])
+    rows.append([InlineKeyboardButton("📩 پشتیبانی", callback_data="support_menu")])  # ← دکمه پشتیبانی
     rows.append([InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
     return InlineKeyboardMarkup(rows)
 
