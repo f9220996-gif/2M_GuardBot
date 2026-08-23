@@ -45,10 +45,13 @@ async def show_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not groups:
         text = "شما هنوز ربات رو به هیچ گروهی اضافه نکردید."
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]
+        ])
         if query:
-            await query.edit_message_text(text)
+            await query.edit_message_text(text, reply_markup=kb)
         else:
-            await update.effective_message.reply_text(text)
+            await update.effective_message.reply_text(text, reply_markup=kb)
         return
 
     rows = []
@@ -435,11 +438,10 @@ async def show_warned_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------------------
-# روشن/خاموش کردن قابلیت‌های گروه (فیلتر فحش، بازی‌ها، بلک‌لیست و ...)
+# روشن/خاموش کردن قابلیت‌های گروه
 # ---------------------------------------------------------------------------
 
 def _build_features_keyboard(chat_id):
-    """چیدمان دستی و بالانس: بلک‌لیست (به‌خاطر متن طولانی) تنها تو یه ردیف، بقیه دوتا-دوتا"""
     def btn(key):
         enabled = db.is_feature_enabled(chat_id, key)
         icon = "✔" if enabled else "✘"
@@ -451,7 +453,7 @@ def _build_features_keyboard(chat_id):
         [btn("photos"), btn("videos")],
         [btn("documents"), btn("date")],
         [btn("dollar")],
-        [btn("ai_moderation")],  # دکمه جدید
+        [btn("ai_moderation")],
         [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")],
     ]
     return InlineKeyboardMarkup(rows_kb)
@@ -487,7 +489,7 @@ async def toggle_feature(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_state = not current
     db.set_feature_enabled(chat_id, feature_key, new_state)
 
-    await query.answer("روشن شد ✔" if new_state else "خاموش شد ❌")
+    await query.answer("روشن شد ✔" if new_state else "خاموش شد ✘")
     await query.edit_message_text(
         "🧩 روشن/خاموش قابلیت‌ها\n\nروی هرکدوم بزن تا عوض بشه. برای غیرمدیران: خاموش = پاک + پیام هشدار.",
         reply_markup=_build_features_keyboard(chat_id)
@@ -495,7 +497,7 @@ async def toggle_feature(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------------------
-# لیست گزارش‌های ثبت‌شده توسط اعضا
+# لیست گزارش‌ها
 # ---------------------------------------------------------------------------
 
 async def show_reports_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
