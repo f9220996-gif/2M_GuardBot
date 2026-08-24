@@ -130,7 +130,7 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if consumed:
             return
 
-    if not db.is_feature_enabled(chat.id, "ai_moderation"):
+    if db.is_feature_enabled(chat.id, "bad_words"):
         await check_message_for_bad_words(update, context)
 
 
@@ -192,19 +192,35 @@ async def on_start_menu_button(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
+# ===== گیت خاموشی سراسری (با بالاترین اولویت) =====
 async def global_shutdown_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    این هندلر با بالاترین اولویت (group=-1) روی همه‌ی آپدیت‌ها اجرا می‌شه.
+    اگه ربات به‌صورت سراسری توسط سازنده خاموش شده باشه، جلوی پردازش
+    همه‌ی هندلرهای دیگه (پیام، دکمه، عضو جدید، هرچی) رو می‌گیره —
+    فقط سازنده استثنا هست.
+    """
+    # چک کن که ربات خاموش نباشه
     if db.is_global_active():
         return
+    
     user = update.effective_user
+    
+    # اگر کاربر سازنده است، اجازه بده
     if user and user.id == CREATOR_ID:
         return
+    
+    # اگر پیام در پی‌وی هست، پیام خاموشی بفرست
     chat = update.effective_chat
-    if chat and chat.type == "private" and update.effective_message:
+    if chat and chat.type == "private":
         try:
             await update.effective_message.reply_text(db.get_shutdown_message())
         except Exception:
             pass
+    
+    # جلوگیری از پردازش بیشتر
     raise ApplicationHandlerStop
+# ====================================================
 
 
 def main():
@@ -217,6 +233,7 @@ def main():
     app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     async def guarded_group_text(update, context):
+        # چک کن که ربات خاموش نباشه (فقط برای سازنده)
         if not db.is_global_active() and update.effective_user.id != CREATOR_ID:
             return
         await on_group_text(update, context)
@@ -224,10 +241,14 @@ def main():
     async def guarded_private_text(update, context):
         chat = update.effective_chat
         user = update.effective_user
+        
+        # اگر ربات خاموشه و کاربر سازنده نیست
         if not db.is_global_active() and user.id != CREATOR_ID:
             if chat.type == "private":
                 await update.effective_message.reply_text(db.get_shutdown_message())
             return
+        
+        # دریافت متن‌ها از کاربر
         consumed = await receive_shutdown_text(update, context)
         if consumed:
             return
@@ -240,13 +261,14 @@ def main():
         consumed = await receive_warn_text(update, context)
         if consumed:
             return
+        
         text = (update.effective_message.text or "").strip()
         if text in PRICE_LOOKUP_NAMES:
             await cmd_crypto_single(update, context)
         elif text == "رمز ارز":
             await cmd_crypto_all(update, context)
 
-    # ===== گیت خاموشی =====
+    # ===== گیت خاموشی سراسری: بالاترین اولویت (group=-1) =====
     app.add_handler(TypeHandler(Update, global_shutdown_gate), group=-1)
     app.add_handler(CallbackQueryHandler(track_nav_state), group=-1)
 
