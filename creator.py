@@ -75,6 +75,7 @@ async def toggle_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await open_creator_panel(update, context)
 
 
+# ===== تنظیم پیام خاموشی =====
 async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """درخواست متن جدید برای پیام خاموشی"""
     query = update.callback_query
@@ -132,8 +133,7 @@ async def receive_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
     return True
 
 
-# ===== بخش جدید: پیام آپدیت ربات =====
-
+# ===== تنظیم پیام آپدیت =====
 async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """درخواست متن جدید برای پیام آپدیت"""
     query = update.callback_query
@@ -211,4 +211,4 @@ async def show_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 **پیام آپدیت فعلی:**\n\n{msg}",
         reply_markup=kb,
         parse_mode="Markdown"
-        )
+    )
