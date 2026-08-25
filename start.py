@@ -53,16 +53,12 @@ async def send_start_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     bot_username = (await context.bot.get_me()).username
     
-    # ===== حذف پیام قبلی (اگر وجود داشته باشد) =====
     try:
         await update.effective_message.delete()
     except Exception:
         pass
-    # ================================================
     
-    # ===== چک کردن اولین بار =====
     is_first_time = db.get_setting(f"first_start_{user.id}", "true") == "true"
-    # =============================
     
     if is_first_time:
         db.set_setting(f"first_start_{user.id}", "false")
@@ -86,13 +82,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(db.get_shutdown_message())
         return
     
-    # ===== حذف کیبورد قبلی =====
     await update.effective_message.reply_text(
         "🤖",
         reply_markup=ReplyKeyboardRemove()
     )
-    # ===========================
-    
     await send_start_panel(update, context)
 
 HELP_TEXT = (
@@ -179,16 +172,11 @@ async def ai_use_chatgpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ===== تابع ری‌استارت =====
+# ===== ری‌استارت برای همه (بدون محدودیت سازنده) =====
 async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ری‌استارت ربات (فقط برای سازنده)"""
+    """ری‌استارت ربات (برای همه کاربران)"""
     query = update.callback_query
     await query.answer()
-    
-    user = update.effective_user
-    if user.id != CREATOR_ID:
-        await query.edit_message_text("✘ فقط سازنده ربات می‌تونه ری‌استارت کنه.")
-        return
     
     # ===== حذف پیام دکمه ری‌استارت =====
     try:
