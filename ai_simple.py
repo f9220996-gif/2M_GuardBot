@@ -41,19 +41,23 @@ async def get_ai_response(text, model_type="gemini"):
 
 # ===== تابع ai_handler (برای گروه) =====
 async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """پاسخ در گروه (با تگ شدن)"""
+    """پاسخ در گروه (با تگ شدن با /Bot)"""
     if not update.message or not update.message.text:
         return
     
     text = update.message.text
     bot_username = context.bot.username
     
-    if "@Bot" not in text and f"@{bot_username}" not in text:
+    # ===== تغییر تگ: /Bot به جای @Bot =====
+    if "/Bot" not in text and f"/{bot_username}" not in text:
         return
+    # ========================================
     
-    question = re.sub(r"@Bot\s*", "", text)
-    question = re.sub(f"@{bot_username}\s*", "", question)
+    # ===== پاک کردن تگ از متن =====
+    question = re.sub(r"/Bot\s*", "", text)
+    question = re.sub(f"/{bot_username}\s*", "", question)
     question = question.strip()
+    # ================================
     
     if not question:
         await update.message.reply_text("🧐 چی بپرسم؟")
