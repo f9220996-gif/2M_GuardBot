@@ -71,6 +71,9 @@ from support import (
     support_admin_panel, show_support_message, support_reply, send_support_reply, support_delete
 )
 
+# ===== تگ =====
+from tag_all import tag_all_members, tag_close
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -192,25 +195,15 @@ async def on_start_menu_button(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
-# ===== گیت خاموشی سراسری (با بالاترین اولویت) =====
+# ===== گیت خاموشی سراسری =====
 async def global_shutdown_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    این هندلر با بالاترین اولویت (group=-1) روی همه‌ی آپدیت‌ها اجرا می‌شه.
-    اگه ربات به‌صورت سراسری توسط سازنده خاموش شده باشه، جلوی پردازش
-    همه‌ی هندلرهای دیگه (پیام، دکمه، عضو جدید، هرچی) رو می‌گیره —
-    فقط سازنده استثنا هست.
-    """
-    # چک کن که ربات خاموش نباشه
     if db.is_global_active():
         return
     
     user = update.effective_user
-    
-    # اگر کاربر سازنده است، اجازه بده
     if user and user.id == CREATOR_ID:
         return
     
-    # اگر پیام در پی‌وی هست، پیام خاموشی بفرست
     chat = update.effective_chat
     if chat and chat.type == "private":
         try:
@@ -218,9 +211,7 @@ async def global_shutdown_gate(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
     
-    # جلوگیری از پردازش بیشتر
     raise ApplicationHandlerStop
-# ====================================================
 
 
 def main():
@@ -233,7 +224,6 @@ def main():
     app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
 
     async def guarded_group_text(update, context):
-        # چک کن که ربات خاموش نباشه (فقط برای سازنده)
         if not db.is_global_active() and update.effective_user.id != CREATOR_ID:
             return
         await on_group_text(update, context)
@@ -242,13 +232,11 @@ def main():
         chat = update.effective_chat
         user = update.effective_user
         
-        # اگر ربات خاموشه و کاربر سازنده نیست
         if not db.is_global_active() and user.id != CREATOR_ID:
             if chat.type == "private":
                 await update.effective_message.reply_text(db.get_shutdown_message())
             return
         
-        # دریافت متن‌ها از کاربر
         consumed = await receive_shutdown_text(update, context)
         if consumed:
             return
@@ -268,11 +256,11 @@ def main():
         elif text == "رمز ارز":
             await cmd_crypto_all(update, context)
 
-    # ===== گیت خاموشی سراسری: بالاترین اولویت (group=-1) =====
+    # ===== گیت خاموشی =====
     app.add_handler(TypeHandler(Update, global_shutdown_gate), group=-1)
     app.add_handler(CallbackQueryHandler(track_nav_state), group=-1)
 
-    # ===== هوش مصنوعی پاسخ به سوالات (گروه 0) =====
+    # ===== هوش مصنوعی =====
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
         ai_handler
@@ -302,18 +290,22 @@ def main():
         private_media_router
     ))
 
-    # ===== پیام‌های گروه (گروه 2) =====
+    # ===== پیام‌های گروه =====
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, guarded_group_text
     ), group=2)
 
-    # ===== چک لیست سیاه گیف/استیکر =====
+    # ===== تگ =====
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, tag_all_members))
+    app.add_handler(CallbackQueryHandler(tag_close, pattern="^tag_close:"))
+
+    # ===== چک لیست سیاه =====
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & (filters.ANIMATION | filters.Sticker.ALL),
         check_blacklisted_media
     ))
 
-    # ===== چک ارسال مدیا (گروه 3) =====
+    # ===== چک ارسال مدیا =====
     app.add_handler(MessageHandler(
         filters.ChatType.GROUPS & (
             filters.PHOTO | filters.VIDEO | filters.Document.ALL |
@@ -404,7 +396,7 @@ def main():
     app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
     app.job_queue.run_repeating(run_auto_cleanup_job, interval=3600, first=300)
 
-    # ===== ثبت آخرین آیدی پیام (گروه 5) =====
+    # ===== ثبت آخرین آیدی پیام =====
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.ALL, track_last_message), group=5)
 
     logger.info("🤖 ربات در حال اجراست...")
