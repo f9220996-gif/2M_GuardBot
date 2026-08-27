@@ -296,7 +296,7 @@ def main():
     ), group=2)
 
     # ===== تگ =====
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, tag_all_members))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tag_all_members))
     app.add_handler(CallbackQueryHandler(tag_close, pattern="^tag_close:"))
 
     # ===== چک لیست سیاه =====
