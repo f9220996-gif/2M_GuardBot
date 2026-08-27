@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-تگ کردن اعضایی که قبلاً در گروه پیام داده‌اند
-با کلمه "تگ"
+تگ کردن همه اعضای گروه با کلمه "تگ"
 """
 
 import time
@@ -9,12 +8,11 @@ import asyncio
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
-import database as db
 from permissions import is_admin
 
 
 async def tag_all_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """تگ کردن اعضایی که قبلاً پیام داده‌اند"""
+    """تگ کردن همه اعضای گروه با کلمه "تگ" """
     
     message = update.effective_message
     chat = update.effective_chat
@@ -46,7 +44,7 @@ async def tag_all_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.chat_data["tag_all_last_use"] = time.time()
     
     # ===== پیام در حال اجرا =====
-    status_msg = await message.reply_text("🔄 در حال آماده‌سازی تگ...")
+    status_msg = await message.reply_text("🔄 در حال تگ کردن اعضا...")
     # =============================
     
     try:
@@ -55,28 +53,31 @@ async def tag_all_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admin_ids = [admin.user.id for admin in admins]
         # ===============================
         
-        # ===== دریافت کاربرانی که قبلاً پیام داده‌اند از دیتابیس =====
-        # فرض میکنیم توی دیتابیس جدولی برای کاربران داریم
-        # اگه نداری، باید یه جدول جدا برای ذخیره کاربران بسازی
-        users = db.get_all_users_in_group(chat.id)  # این تابع رو باید بسازی
-        # ======================================================
+        # ===== دریافت اعضایی که اخیراً پیام دادن =====
+        # از تاریخچه پیام‌های اخیر استفاده میکنیم
+        members = []
+        async for msg in context.bot.get_chat_history(chat.id, limit=100):
+            if msg.from_user and not msg.from_user.is_bot:
+                if msg.from_user.id not in [m["id"] for m in members]:
+                    members.append({
+                        "id": msg.from_user.id,
+                        "username": msg.from_user.username,
+                        "full_name": msg.from_user.full_name
+                    })
+        # =============================================
         
-        if not users:
+        if not members:
             await status_msg.edit_text("❌ هیچ کاربری برای تگ کردن وجود ندارد.")
             return
         
         # ===== ساخت لیست تگ =====
         mentions = []
-        for user_data in users:
-            user_id = user_data["user_id"]
-            username = user_data.get("username")
-            full_name = user_data.get("full_name", "کاربر")
-            
-            if user_id not in admin_ids:  # مدیران رو تگ نکن
-                if username:
-                    mentions.append(f"@{username}")
+        for member in members:
+            if member["id"] not in admin_ids:  # مدیران رو تگ نکن
+                if member["username"]:
+                    mentions.append(f"@{member['username']}")
                 else:
-                    mentions.append(f"[{full_name}](tg://user?id={user_id})")
+                    mentions.append(f"[{member['full_name']}](tg://user?id={member['id']})")
         # ========================
         
         if not mentions:
@@ -105,7 +106,7 @@ async def tag_all_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await message.reply_text(text_msg, parse_mode="Markdown")
             
-            await asyncio.sleep(1)  # جلوگیری از محدودیت تلگرام
+            await asyncio.sleep(1)
         # ==================================
         
     except Exception as e:
