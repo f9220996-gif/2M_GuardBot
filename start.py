@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 پیام /start در پی‌وی ربات + دکمه‌های شیشه‌ای (Inline Keyboard)
+فقط یک پیام پنل هر بار «در حال استفاده» باقی می‌ماند؛
+هر بار که پنل جدید ساخته می‌شود، پنل قبلی (اگر وجود داشته باشد) پاک می‌شود.
 """
 
 import os
@@ -35,6 +37,7 @@ WELCOME_TEXT = (
     "🌟 **نکته:** ربات را در گروه خود ادمین کامل کنید تا همه قابلیت‌ها فعال شوند."
 )
 
+
 def build_start_keyboard(user_id: int, bot_username: str):
     rows = [
         [InlineKeyboardButton("➕ افزودن به گروه", url=f"https://t.me/{bot_username}?startgroup=true&admin=delete_messages+restrict_members+invite_users+pin_messages")],
@@ -49,29 +52,53 @@ def build_start_keyboard(user_id: int, bot_username: str):
     rows.append([InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
     return InlineKeyboardMarkup(rows)
 
+
+async def _delete_old_panel(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """پنل قبلیِ همین چت رو (اگه هنوز وجود داشته باشه) پاک می‌کنه"""
+    old_msg_id = db.get_setting(f"panel_msg_{chat_id}")
+    if old_msg_id:
+        try:
+            await context.bot.delete_message(chat_id, int(old_msg_id))
+        except Exception:
+            pass  # ممکنه از قبل پاک شده باشه یا خیلی قدیمی باشه
+
+
+def _remember_panel(chat_id: int, message_id: int):
+    """آیدی پنل تازه‌ساخته‌شده رو به‌عنوان «پنل فعلی» ذخیره می‌کنه"""
+    db.set_setting(f"panel_msg_{chat_id}", str(message_id))
+
+
 async def send_start_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    chat = update.effective_chat
     bot_username = (await context.bot.get_me()).username
-    
+
     try:
         await update.effective_message.delete()
     except Exception:
         pass
-    
+
+    # ===== پاک کردن پنل قبلی، تا فقط یک پیام «در حال استفاده» بمونه =====
+    await _delete_old_panel(context, chat.id)
+    # ======================================================================
+
     is_first_time = db.get_setting(f"first_start_{user.id}", "true") == "true"
-    
+
     if is_first_time:
         db.set_setting(f"first_start_{user.id}", "false")
-        await update.effective_message.reply_text(
+        sent = await update.effective_message.reply_text(
             WELCOME_TEXT,
             reply_markup=build_start_keyboard(user.id, bot_username),
             parse_mode="Markdown"
         )
     else:
-        await update.effective_message.reply_text(
+        sent = await update.effective_message.reply_text(
             START_TEXT,
             reply_markup=build_start_keyboard(user.id, bot_username)
         )
+
+    _remember_panel(chat.id, sent.message_id)
+
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -81,12 +108,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not db.is_global_active() and user.id != CREATOR_ID:
         await update.effective_message.reply_text(db.get_shutdown_message())
         return
-    
-    await update.effective_message.reply_text(
+
+    # پیام موقت فقط برای حذف کیبورد معمولی (اگه روی صفحه بوده)، بلافاصله پاک می‌شه
+    temp_msg = await update.effective_message.reply_text(
         "🤖",
         reply_markup=ReplyKeyboardRemove()
     )
+    try:
+        await temp_msg.delete()
+    except Exception:
+        pass
+
     await send_start_panel(update, context)
+
 
 HELP_TEXT = (
     "🤖 **راهنمای کامل ربات**\n\n"
@@ -121,22 +155,25 @@ HELP_TEXT = (
     "ربات را ادمین کامل کنید تا همه قابلیت‌ها فعال شوند."
 )
 
+
 async def on_help_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """به‌جای فرستادن پیام جدید، همون پنل فعلی رو ویرایش می‌کنه"""
     query = update.callback_query
     await query.answer()
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]])
-    await query.message.reply_text(HELP_TEXT, reply_markup=kb, parse_mode="Markdown")
+    await query.edit_message_text(HELP_TEXT, reply_markup=kb, parse_mode="Markdown")
+
 
 async def ai_model_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🤖 Gemini (Google)", callback_data="ai_use_gemini")],
         [InlineKeyboardButton("🤖 ChatGPT (OpenAI)", callback_data="ai_use_chatgpt")],
         [InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")],
     ])
-    
+
     await query.edit_message_text(
         "🧠 **انتخاب هوش مصنوعی**\n\n"
         "لطفاً مدل مورد نظر را انتخاب کنید:\n\n"
@@ -145,6 +182,7 @@ async def ai_model_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=kb,
         parse_mode="Markdown"
     )
+
 
 async def ai_use_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -159,6 +197,7 @@ async def ai_use_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+
 async def ai_use_chatgpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -172,31 +211,25 @@ async def ai_use_chatgpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ===== ری‌استارت برای همه (بدون محدودیت سازنده) =====
+
 async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ری‌استارت ربات (برای همه کاربران)"""
     query = update.callback_query
     await query.answer()
-    
-    # ===== حذف پیام دکمه ری‌استارت =====
+
     try:
         await query.message.delete()
     except Exception:
         pass
-    # ===================================
-    
-    # ===== ارسال پنل اصلی =====
+
     await update.effective_message.reply_text(
         "🤖 خوش آمدید!",
         reply_markup=ReplyKeyboardRemove()
     )
     await send_start_panel(update, context)
-    # ===========================
-    
-    # ===== ری‌استارت واقعی در پس‌زمینه =====
+
     try:
         python = sys.executable
         os.execl(python, python, *sys.argv)
     except Exception as e:
         await update.effective_message.reply_text(f"❌ خطا در ری‌استارت: {e}")
-    # ========================================
