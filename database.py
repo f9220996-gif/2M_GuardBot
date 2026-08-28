@@ -96,6 +96,17 @@ def init_db():
         )
         """)
 
+        # ===== کاربران دیده‌شده (برای قابلیت تگ) =====
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS seen_users (
+            chat_id INTEGER,
+            user_id INTEGER,
+            username TEXT,
+            full_name TEXT,
+            PRIMARY KEY (chat_id, user_id)
+        )
+        """)
+
         c.execute("""
         CREATE TABLE IF NOT EXISTS bad_words (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -419,6 +430,28 @@ def unban_record(chat_id, user_id):
     with get_conn() as conn:
         c = conn.cursor()
         c.execute("UPDATE bans SET active=0 WHERE chat_id=? AND user_id=? AND active=1", (chat_id, user_id))
+
+
+# ===== کاربران دیده‌شده (برای قابلیت تگ) =====
+def save_seen_user(chat_id, user_id, username, full_name):
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO seen_users (chat_id, user_id, username, full_name) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(chat_id, user_id) DO UPDATE SET "
+            "username=excluded.username, full_name=excluded.full_name",
+            (chat_id, user_id, username, full_name)
+        )
+
+
+def get_seen_users(chat_id):
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT user_id, username, full_name FROM seen_users WHERE chat_id=?",
+            (chat_id,)
+        )
+        return c.fetchall()
 
 
 # ===== لیست سیاه =====
@@ -818,4 +851,4 @@ def set_image_lang(chat_id, lang_code):
             "INSERT INTO bot_settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (f"img_lang_{chat_id}", lang_code)
-)
+        )
