@@ -72,7 +72,7 @@ from support import (
 )
 
 # ===== تگ =====
-from tag_all import tag_all_members, tag_close
+from tag_all import tag_all_members, tag_close, track_seen_user
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -296,7 +296,18 @@ def main():
     ), group=2)
 
     # ===== تگ =====
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, tag_all_members))
+    # نکته مهم: این دو handler عمداً تو گروه‌های شماره‌ی جداگانه (6 و 7) ثبت شدن،
+    # نه گروه 0 (جایی که ai_handler هست). چون تو python-telegram-bot، وقتی چند
+    # handler تو یه گروه شماره‌ای باشن، فقط اولی که مچ بشه اجرا می‌شه و بقیه‌ی
+    # همون گروه اصلاً چک نمی‌شن. قبلاً چون تگ تو همون گروه 0 بود، ai_handler
+    # (که زودتر ثبت شده و روی همه‌ی پیام‌های متنی گروه مچ می‌شه) جلوی اجرای
+    # تگ رو می‌گرفت. با گروه شماره‌ی مجزا، این دو مستقل از بقیه همیشه چک می‌شن.
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, track_seen_user
+    ), group=6)
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, tag_all_members
+    ), group=7)
     app.add_handler(CallbackQueryHandler(tag_close, pattern="^tag_close:"))
 
     # ===== چک لیست سیاه =====
