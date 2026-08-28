@@ -63,13 +63,17 @@ async def open_creator_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def toggle_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """روشن/خاموش کردن سراسری ربات"""
     query = update.callback_query
-    _, action = query.data.split(":")
     user = update.effective_user
-    
+
     if user.id != CREATOR_ID:
         await query.answer("⛔️ فقط سازنده", show_alert=True)
         return
-    
+
+    # callback_data به شکل "creator_global_on" یا "creator_global_off" است (بدون ":")
+    # قبلاً اینجا با split(":") پارس می‌شد که چون ":" توی متن نبود، خطا می‌داد
+    # و دکمه اصلاً واکنشی نشون نمی‌داد.
+    action = "on" if query.data == "creator_global_on" else "off"
+
     db.set_global_active(action == "on")
     await query.answer("✔ ذخیره شد")
     await open_creator_panel(update, context)
@@ -86,13 +90,10 @@ async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer("⛔️ فقط سازنده", show_alert=True)
         return
     
-    # ===== دکمه بازگشت =====
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ بازگشت", callback_data="creator_panel_open")]
     ])
-    # ========================
     
-    # ===== ویرایش پیام فعلی =====
     await query.edit_message_text(
         "📝 **تغییر پیام خاموشی**\n\n"
         "لطفاً متن جدید پیام خاموشی را ارسال کنید.\n"
@@ -101,7 +102,6 @@ async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=kb,
         parse_mode="Markdown"
     )
-    # =============================
     
     context.user_data["waiting_for_shutdown_text"] = True
 
@@ -124,11 +124,8 @@ async def receive_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
     db.set_shutdown_message(text)
     context.user_data["waiting_for_shutdown_text"] = False
     
-    # ===== بعد از تغییر، برگرد به پنل سازنده =====
     await update.effective_message.reply_text("✔ پیام خاموشی با موفقیت تغییر کرد!")
-    # ===== ارسال مجدد پنل سازنده =====
     await open_creator_panel(update, context)
-    # ================================
     
     return True
 
@@ -144,13 +141,10 @@ async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("⛔️ فقط سازنده", show_alert=True)
         return
     
-    # ===== دکمه بازگشت =====
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ بازگشت", callback_data="creator_panel_open")]
     ])
-    # ========================
     
-    # ===== ویرایش پیام فعلی =====
     await query.edit_message_text(
         "📝 **تغییر پیام آپدیت**\n\n"
         "لطفاً متن جدید پیام آپدیت را ارسال کنید.\n"
@@ -159,7 +153,6 @@ async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=kb,
         parse_mode="Markdown"
     )
-    # =============================
     
     context.user_data["waiting_for_update_msg"] = True
 
@@ -182,11 +175,8 @@ async def receive_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db.set_setting("update_message", text)
     context.user_data["waiting_for_update_msg"] = False
     
-    # ===== بعد از تغییر، برگرد به پنل سازنده =====
     await update.effective_message.reply_text("✔ پیام آپدیت با موفقیت تغییر کرد!")
-    # ===== ارسال مجدد پنل سازنده =====
     await open_creator_panel(update, context)
-    # ================================
     
     return True
 
