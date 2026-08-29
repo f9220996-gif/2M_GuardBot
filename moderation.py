@@ -6,6 +6,7 @@
 
 import time
 from datetime import datetime, timedelta
+from html import escape
 
 from telegram import Update, ChatPermissions
 from telegram.ext import ContextTypes
@@ -15,13 +16,18 @@ from permissions import can_use_moderation_commands, can_target_user, parse_dura
 from persian_date import build_restriction_message, build_duration_text, utc_from_ts, tehran_from_ts
 
 
+def _mention_html(user_id, display_name):
+    """لینک HTML که تلگرام حتماً ازش یه text_mention واقعی (با آیدی کاربر) می‌سازه"""
+    return f'<a href="tg://user?id={user_id}">{escape(display_name)}</a>'
+
+
 async def _require_group(update: Update):
     chat = update.effective_chat
     return chat and chat.type in ("group", "supergroup")
 
 
-async def _reply(update, text):
-    await update.effective_message.reply_text(text)
+async def _reply(update, text, parse_mode=None):
+    await update.effective_message.reply_text(text, parse_mode=parse_mode)
 
 
 def _display_name(target):
@@ -238,12 +244,14 @@ async def cmd_sokoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     username = _display_name(target)
     db.add_mute(chat.id, target.id, username, reason, bool(reason), until_ts)
+    mention = _mention_html(target.id, username)
 
     await _reply(
         update,
-        f"🔇 {username} به مدت {build_duration_text(duration)} سکوت شد.\n"
-        f"{build_restriction_message(until_dt_display, chat.title)}"
-        + (f"\nدلیل: {reason}" if reason else "")
+        f"🔇 {mention} به مدت {build_duration_text(duration)} سکوت شد.\n"
+        f"{escape(build_restriction_message(until_dt_display, chat.title))}"
+        + (f"\nدلیل: {escape(reason)}" if reason else ""),
+        parse_mode="HTML"
     )
 
 
@@ -293,7 +301,8 @@ async def cmd_azad_kon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db.remove_mute(chat.id, target.id)
     username = _display_name(target)
-    sent_msg = await update.effective_message.reply_text(f"🔊 سکوت {username} برداشته شد.")
+    mention = _mention_html(target.id, username)
+    sent_msg = await update.effective_message.reply_text(f"🔊 سکوت {mention} برداشته شد.", parse_mode="HTML")
     context.job_queue.run_once(
         _delete_message_later, when=5,
         data={"chat_id": chat.id, "message_id": sent_msg.message_id},
@@ -338,11 +347,13 @@ async def cmd_ban_kon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     username = _display_name(target)
     db.add_ban(chat.id, target.id, username, reason, bool(reason))
+    mention = _mention_html(target.id, username)
 
     await _reply(
         update,
-        f"⛔️ {username} از گروه بن شد."
-        + (f"\nدلیل: {reason}" if reason else "\n(بدون دلیل ثبت‌شده)")
+        f"⛔️ {mention} از گروه بن شد."
+        + (f"\nدلیل: {escape(reason)}" if reason else "\n(بدون دلیل ثبت‌شده)"),
+        parse_mode="HTML"
     )
 
 
@@ -386,25 +397,26 @@ async def cmd_akhtar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_warning(chat.id, target.id, username, reason, level)
 
     warn_row = db.get_warning_text(chat.id, level)
+    mention = _mention_html(target.id, username)
     if warn_row and warn_row["text"]:
-        caption = warn_row["text"]
+        caption = f"{mention}\n{escape(warn_row['text'])}"
     else:
-        caption = f"⚠️ {username} اخطار گرفت (اخطار شماره {level})."
+        caption = f"⚠️ {mention} اخطار گرفت (اخطار شماره {level})."
     if reason:
-        caption += f"\nدلیل: {reason}"
+        caption += f"\nدلیل: {escape(reason)}"
 
     try:
         if warn_row and warn_row["sticker_file_id"]:
             await context.bot.send_sticker(chat.id, warn_row["sticker_file_id"])
-            await _reply(update, caption)
+            await _reply(update, caption, parse_mode="HTML")
         elif warn_row and warn_row["gif_file_id"]:
-            await context.bot.send_animation(chat.id, warn_row["gif_file_id"], caption=caption)
+            await context.bot.send_animation(chat.id, warn_row["gif_file_id"], caption=caption, parse_mode="HTML")
         elif warn_row and warn_row["photo_file_id"]:
-            await context.bot.send_photo(chat.id, warn_row["photo_file_id"], caption=caption)
+            await context.bot.send_photo(chat.id, warn_row["photo_file_id"], caption=caption, parse_mode="HTML")
         else:
-            await _reply(update, caption)
+            await _reply(update, caption, parse_mode="HTML")
     except Exception:
-        await _reply(update, caption)
+        await _reply(update, caption, parse_mode="HTML")
 
 
 # ---------------------------------------------------------------------------
