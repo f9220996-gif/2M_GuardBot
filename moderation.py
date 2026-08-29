@@ -24,6 +24,48 @@ async def _reply(update, text):
     await update.effective_message.reply_text(text)
 
 
+def _display_name(target):
+    username = getattr(target, "username", None)
+    if username:
+        return f"@{username}"
+    name = getattr(target, "full_name", None) or getattr(target, "first_name", None)
+    return name or "کاربر"
+
+
+async def _resolve_target_user(message, bot):
+    """
+    کاربر هدف رو از ریپلای پیدا می‌کنه.
+    اگه ریپلای مستقیم روی پیام خودِ کاربر باشه، همون کاربر برگردونده می‌شه.
+    اگه ریپلای روی پیام خودِ ربات باشه (مثلاً پیام هشدار/سکوت خودکار که بات
+    فرستاده)، به‌جای خودِ ربات، از منشن (@یوزرنیم) داخل متن پیام، کاربر
+    واقعی پیدا و برگردونده می‌شه. اگه چیزی پیدا نشه، None برمی‌گرده.
+    """
+    reply_msg = message.reply_to_message
+    if not reply_msg:
+        return None
+
+    from_user = reply_msg.from_user
+    if from_user and not from_user.is_bot:
+        return from_user
+
+    # ریپلای روی پیام خودِ رباته → دنبال منشن تو متن پیام بگرد
+    entities = reply_msg.entities or reply_msg.caption_entities or []
+    text = reply_msg.text or reply_msg.caption or ""
+
+    for ent in entities:
+        if ent.type == "text_mention" and ent.user:
+            return ent.user
+        if ent.type == "mention":
+            username = text[ent.offset + 1: ent.offset + ent.length]  # بدون @
+            try:
+                resolved = await bot.get_chat(f"@{username}")
+                return resolved  # داره .id / .username / .full_name
+            except Exception:
+                continue
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # خاموشی [Xh/Xm/Xs]  -> قفل کردن گروه (فقط مدیران بتوانند پیام بدهند)
 # ---------------------------------------------------------------------------
@@ -160,7 +202,10 @@ async def cmd_sokoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _reply(update, "❗️ لطفاً روی پیام کاربر مورد نظر ریپلای کن و بنویس: سکوت 30m یا سکوت 10")
         return
 
-    target = message.reply_to_message.from_user
+    target = await _resolve_target_user(message, context.bot)
+    if not target:
+        await _reply(update, "❗️ نتونستم کاربر هدف رو پیدا کنم. مطمئن شو تو پیامی که روش ریپلای کردی، یوزرنیم (@) کاربر مشخص باشه.")
+        return
     if not await can_target_user(context.bot, chat.id, user.id, target.id):
         await _reply(update, "⛔️ شما اجازه سکوت دادن به این کاربر را ندارید.")
         return
@@ -191,7 +236,7 @@ async def cmd_sokoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _reply(update, f"❌ نتونستم کاربر رو سکوت بدم.\n{e}")
         return
 
-    username = f"@{target.username}" if target.username else target.full_name
+    username = _display_name(target)
     db.add_mute(chat.id, target.id, username, reason, bool(reason), until_ts)
 
     await _reply(
@@ -218,10 +263,13 @@ async def cmd_azad_kon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not message.reply_to_message:
-        await _reply(update, "❗️ لطفاً روی پیام کاربر مورد نظر ریپلای کن و بنویس: آزاد کن")
+        await _reply(update, "❗️ لطفاً روی پیام کاربر مورد نظر (یا پیام هشدار/سکوتِ ربات که اسمش توشه) ریپلای کن و بنویس: آزاد کن")
         return
 
-    target = message.reply_to_message.from_user
+    target = await _resolve_target_user(message, context.bot)
+    if not target:
+        await _reply(update, "❗️ نتونستم کاربر هدف رو پیدا کنم. مطمئن شو تو پیامی که روش ریپلای کردی، یوزرنیم (@) کاربر مشخص باشه.")
+        return
 
     try:
         await context.bot.restrict_chat_member(
@@ -244,7 +292,7 @@ async def cmd_azad_kon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db.remove_mute(chat.id, target.id)
-    username = f"@{target.username}" if target.username else target.full_name
+    username = _display_name(target)
     sent_msg = await update.effective_message.reply_text(f"🔊 سکوت {username} برداشته شد.")
     context.job_queue.run_once(
         _delete_message_later, when=5,
@@ -272,7 +320,10 @@ async def cmd_ban_kon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _reply(update, "❗️ لطفاً روی پیام کاربر مورد نظر ریپلای کن و بنویس: بن کن [دلیل اختیاری]")
         return
 
-    target = message.reply_to_message.from_user
+    target = await _resolve_target_user(message, context.bot)
+    if not target:
+        await _reply(update, "❗️ نتونستم کاربر هدف رو پیدا کنم. مطمئن شو تو پیامی که روش ریپلای کردی، یوزرنیم (@) کاربر مشخص باشه.")
+        return
     if not await can_target_user(context.bot, chat.id, user.id, target.id):
         await _reply(update, "⛔️ شما اجازه بن کردن این کاربر را ندارید.")
         return
@@ -285,7 +336,7 @@ async def cmd_ban_kon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _reply(update, f"❌ نتونستم کاربر رو بن کنم.\n{e}")
         return
 
-    username = f"@{target.username}" if target.username else target.full_name
+    username = _display_name(target)
     db.add_ban(chat.id, target.id, username, reason, bool(reason))
 
     await _reply(
@@ -320,13 +371,16 @@ async def cmd_akhtar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _reply(update, "❗️ لطفاً روی پیام کاربر مورد نظر ریپلای کن و بنویس: اخطار [دلیل اختیاری]")
         return
 
-    target = message.reply_to_message.from_user
+    target = await _resolve_target_user(message, context.bot)
+    if not target:
+        await _reply(update, "❗️ نتونستم کاربر هدف رو پیدا کنم. مطمئن شو تو پیامی که روش ریپلای کردی، یوزرنیم (@) کاربر مشخص باشه.")
+        return
     if not await can_target_user(context.bot, chat.id, user.id, target.id):
         await _reply(update, "⛔️ شما اجازه اخطار دادن به این کاربر را ندارید.")
         return
 
     reason = " ".join(context.args) if context.args else None
-    username = f"@{target.username}" if target.username else target.full_name
+    username = _display_name(target)
 
     level = db.get_active_warning_count(chat.id, target.id) + 1
     db.add_warning(chat.id, target.id, username, reason, level)
