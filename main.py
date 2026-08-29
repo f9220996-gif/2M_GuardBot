@@ -21,7 +21,7 @@ from start import (
     ai_model_select, ai_use_gemini, ai_use_chatgpt
 )
 from moderation import (
-    cmd_khamoshi, cmd_roshan, cmd_sokoot, cmd_azad_kon, cmd_ban_kon,
+    cmd_khamoshi, cmd_roshan, cmd_sokoot, cmd_azad_kon, cmd_ban_kon, cmd_akhtar,
     cmd_pak, cmd_gif_ban, cmd_sticker_ban, check_blacklisted_media, check_media_permissions
 )
 from bad_words_filter import check_message_for_bad_words
@@ -87,6 +87,7 @@ PERSIAN_COMMANDS = {
     "سکوت": cmd_sokoot,
     "آزاد کن": cmd_azad_kon,
     "بن کن": cmd_ban_kon,
+    "اخطار": cmd_akhtar,
     "پاک": cmd_pak,
     "گیف بن": cmd_gif_ban,
     "استیکر بن": cmd_sticker_ban,
