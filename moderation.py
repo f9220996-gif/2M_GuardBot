@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 دستورات مدیریتی گروه:
-خاموشی / روشن / سکوت / آزاد کن / بن کن / پاک / گیف بن / استیکر بن
+خاموشی / روشن / سکوت / آزاد کن / بن کن / اخطار / پاک / گیف بن / استیکر بن
 """
 
 import time
@@ -47,7 +47,7 @@ async def cmd_khamoshi(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ChatPermissions(can_send_messages=False)
         )
     except Exception as e:
-        await _reply(update, f"✘ نتونستم گروه رو قفل کنم. مطمئن شو ربات ادمینه.\n{e}")
+        await _reply(update, f"❌ نتونستم گروه رو قفل کنم. مطمئن شو ربات ادمینه.\n{e}")
         return
 
     if duration:
@@ -157,7 +157,7 @@ async def cmd_sokoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not message.reply_to_message:
-        await _reply(update, "❗️ لطفاً روی پیام کاربر مورد نظر ریپلای کن و بنویس: سکوت 30m")
+        await _reply(update, "❗️ لطفاً روی پیام کاربر مورد نظر ریپلای کن و بنویس: سکوت 30m یا سکوت 10")
         return
 
     target = message.reply_to_message.from_user
@@ -169,13 +169,13 @@ async def cmd_sokoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     duration = parse_duration_seconds(args_text)
     reason = None
     if args_text:
-        # هرچی بعد از عدد/واحد زمانی باقی موند به عنوان دلیل در نظر گرفته میشه
+        # هرچی بعد از عدد/واحد زمانی (یا عدد تنها) باقی موند به عنوان دلیل در نظر گرفته میشه
         import re
-        reason_text = re.sub(r"(\d+)\s*(h|m|s|ساعت|دقیقه|ثانیه)", "", args_text, flags=re.IGNORECASE).strip()
+        reason_text = re.sub(r"(\d+)\s*(h|m|s|ساعت|دقیقه|ثانیه)?", "", args_text, flags=re.IGNORECASE).strip()
         reason = reason_text or None
 
     if not duration:
-        duration = 10 * 60  # پیش‌فرض ۱۰ دقیقه اگر عددی داده نشده
+        duration = 10 * 60  # پیش‌فرض ۱۰ دقیقه اگر هیچ عددی داده نشده
 
     until_ts = time.time() + duration
     until_dt_api = utc_from_ts(until_ts)
@@ -296,6 +296,64 @@ async def cmd_ban_kon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------------------
+# اخطار (ریپلای) -> ثبت اخطار برای کاربر
+# ---------------------------------------------------------------------------
+
+async def cmd_akhtar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    با ریپلای روی پیام کاربر و نوشتن «اخطار [دلیل اختیاری]»، یک اخطار
+    برای اون کاربر ثبت می‌شه. اگه برای همون سطح اخطار تو پنل مدیریت
+    متن/عکس/گیف/استیکر خاصی تنظیم شده باشه، همون فرستاده می‌شه؛
+    وگرنه یه پیام پیش‌فرض با شماره‌ی اخطار نشون داده می‌شه.
+    """
+    if not await _require_group(update):
+        return
+    chat = update.effective_chat
+    user = update.effective_user
+    message = update.effective_message
+
+    if not await can_use_moderation_commands(context.bot, chat.id, user.id):
+        await _reply(update, "⛔️ فقط مدیران، مالک گروه یا سازنده ربات می‌توانند اخطار بدهند.")
+        return
+
+    if not message.reply_to_message:
+        await _reply(update, "❗️ لطفاً روی پیام کاربر مورد نظر ریپلای کن و بنویس: اخطار [دلیل اختیاری]")
+        return
+
+    target = message.reply_to_message.from_user
+    if not await can_target_user(context.bot, chat.id, user.id, target.id):
+        await _reply(update, "⛔️ شما اجازه اخطار دادن به این کاربر را ندارید.")
+        return
+
+    reason = " ".join(context.args) if context.args else None
+    username = f"@{target.username}" if target.username else target.full_name
+
+    level = db.get_active_warning_count(chat.id, target.id) + 1
+    db.add_warning(chat.id, target.id, username, reason, level)
+
+    warn_row = db.get_warning_text(chat.id, level)
+    if warn_row and warn_row["text"]:
+        caption = warn_row["text"]
+    else:
+        caption = f"⚠️ {username} اخطار گرفت (اخطار شماره {level})."
+    if reason:
+        caption += f"\nدلیل: {reason}"
+
+    try:
+        if warn_row and warn_row["sticker_file_id"]:
+            await context.bot.send_sticker(chat.id, warn_row["sticker_file_id"])
+            await _reply(update, caption)
+        elif warn_row and warn_row["gif_file_id"]:
+            await context.bot.send_animation(chat.id, warn_row["gif_file_id"], caption=caption)
+        elif warn_row and warn_row["photo_file_id"]:
+            await context.bot.send_photo(chat.id, warn_row["photo_file_id"], caption=caption)
+        else:
+            await _reply(update, caption)
+    except Exception:
+        await _reply(update, caption)
+
+
+# ---------------------------------------------------------------------------
 # پاک (ریپلای) -> حذف پیام
 # ---------------------------------------------------------------------------
 
@@ -319,15 +377,30 @@ async def cmd_pak(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not message.reply_to_message:
-        await _reply(update, "❗️ لطفاً روی پیام مورد نظر ریپلای کن و بنویس: پاک")
+        await _reply(update, "❗️ لطفاً روی پیام مورد نظر ریپلای کن و بنویس: پاک یا پاک 10")
         return
 
-    # پیامی که روش ریپلای شده (متن، عکس، هرچی) سریع پاک می‌شود
-    try:
-        await message.reply_to_message.delete()
-    except Exception as e:
-        await _reply(update, f"❌ نتونستم اون پیام رو پاک کنم.\n{e}")
-        return
+    # اگه عدد جلوی «پاک» بود، اون تعداد پیام قبل از پیام ریپلای‌شده هم پاک می‌شن
+    count = 0
+    if context.args and context.args[0].isdigit():
+        count = min(int(context.args[0]), 200)  # سقف ۲۰۰ تا برای جلوگیری از سوءاستفاده
+
+    reply_id = message.reply_to_message.message_id
+    deleted = 0
+    for msg_id in range(reply_id - count, reply_id + 1):
+        try:
+            await context.bot.delete_message(chat.id, msg_id)
+            deleted += 1
+        except Exception:
+            pass  # این پیام یا وجود نداشت یا قبلاً پاک شده بود
+
+    if count:
+        info_msg = await context.bot.send_message(chat.id, f"🗑 {deleted} پیام پاک شد.")
+        context.job_queue.run_once(
+            _delete_message_later, when=4,
+            data={"chat_id": chat.id, "message_id": info_msg.message_id},
+            name=f"delinfo_{chat.id}_{info_msg.message_id}"
+        )
 
     # پیام خودِ دستور «پاک» با ۲ ثانیه تاخیر پاک می‌شود
     context.job_queue.run_once(
@@ -414,6 +487,8 @@ async def check_media_permissions(update: Update, context: ContextTypes.DEFAULT_
         (message.photo, "photos", "عکس"),
         (message.video, "videos", "فیلم"),
         (message.document, "documents", "فایل"),
+        (message.animation, "gifs", "گیف"),
+        (message.sticker, "stickers", "استیکر"),
     ]
     for present, key, label in checks:
         if present and not db.is_feature_enabled(chat.id, key):
@@ -440,8 +515,6 @@ async def check_blacklisted_media(update: Update, context: ContextTypes.DEFAULT_
     message = update.effective_message
     chat = update.effective_chat
     if not message or not chat or chat.type not in ("group", "supergroup"):
-        return
-    if not db.is_feature_enabled(chat.id, "blacklist"):
         return
 
     if message.animation and db.is_gif_blacklisted(chat.id, message.animation.file_unique_id):
