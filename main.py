@@ -33,7 +33,8 @@ from panel import (
     show_banned_list, show_muted_list, show_warned_list,
     show_mute_detail, release_mute_from_panel, ask_edit_mute_duration, set_mute_duration_from_panel,
     show_features_panel, toggle_feature, show_reports_list, clear_reports_cb,
-    open_report_detail, handle_report_action
+    open_report_detail, handle_report_action,
+    open_bad_words_panel, ask_add_bad_word, receive_bad_word_text, delete_bad_word_cb
 )
 from creator import (
     open_creator_panel, toggle_global, ask_set_shutdown_text, receive_shutdown_text,
@@ -250,12 +251,20 @@ def main():
         consumed = await receive_warn_text(update, context)
         if consumed:
             return
+        consumed = await receive_bad_word_text(update, context)
+        if consumed:
+            return
         
         text = (update.effective_message.text or "").strip()
         if text in PRICE_LOOKUP_NAMES:
             await cmd_crypto_single(update, context)
+            return
         elif text == "رمز ارز":
             await cmd_crypto_all(update, context)
+            return
+
+        # هیچ‌کدوم از حالت‌های بالا مچ نشد → جواب هوش مصنوعی (fallback)
+        await ai_private_chat(update, context)
 
     # ===== گیت خاموشی =====
     app.add_handler(TypeHandler(Update, global_shutdown_gate), group=-1)
@@ -271,11 +280,6 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
 
     # ===== پی‌وی =====
-    app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
-        ai_private_chat
-    ))
-
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, guarded_private_text
     ))
@@ -377,6 +381,9 @@ def main():
     app.add_handler(CallbackQueryHandler(ask_add_welcome_media, pattern=r"^wc_media:"))
     app.add_handler(CallbackQueryHandler(clear_welcome_media_cb, pattern=r"^wc_media_clear:"))
     app.add_handler(CallbackQueryHandler(show_warned_list, pattern=r"^grp_warned:"))
+    app.add_handler(CallbackQueryHandler(open_bad_words_panel, pattern=r"^badwords_panel:"))
+    app.add_handler(CallbackQueryHandler(ask_add_bad_word, pattern=r"^badwords_add:"))
+    app.add_handler(CallbackQueryHandler(delete_bad_word_cb, pattern=r"^badwords_del:"))
     app.add_handler(CallbackQueryHandler(open_creator_panel, pattern="^creator_panel_open$"))
     app.add_handler(CallbackQueryHandler(toggle_global, pattern="^creator_global_(on|off)$"))
     app.add_handler(CallbackQueryHandler(ask_set_shutdown_text, pattern="^creator_set_msg$"))
