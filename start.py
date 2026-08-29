@@ -222,10 +222,15 @@ async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
-    await update.effective_message.reply_text(
+    temp_msg = await update.effective_message.reply_text(
         "🤖 خوش آمدید!",
         reply_markup=ReplyKeyboardRemove()
     )
+    try:
+        await temp_msg.delete()
+    except Exception:
+        pass
+
     await send_start_panel(update, context)
 
     try:
