@@ -676,6 +676,11 @@ async def ask_add_bad_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     context.user_data["waiting_for_bad_word_chat_id"] = chat_id
+    # آیدی همین پیام (تو پی‌وی ادمین) رو ذخیره می‌کنیم تا بعداً به‌جای فرستادن
+    # پیام جدید، دقیقاً همینو ویرایش کنیم و دوباره تبدیلش کنیم به لیست کلمات
+    context.user_data["bad_word_prompt_chat_id"] = query.message.chat_id
+    context.user_data["bad_word_prompt_message_id"] = query.message.message_id
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"badwords_panel:{chat_id}")]
     ])
@@ -697,21 +702,51 @@ async def receive_bad_word_text(update: Update, context: ContextTypes.DEFAULT_TY
     if not await _user_can_see_group(context.bot, user.id, chat_id):
         return False
 
+    prompt_chat_id = context.user_data.get("bad_word_prompt_chat_id")
+    prompt_message_id = context.user_data.get("bad_word_prompt_message_id")
+
     text = (update.effective_message.text or "").strip()
-    if text == "/cancel":
+
+    async def _finish(feedback_line):
         context.user_data.pop("waiting_for_bad_word_chat_id", None)
-        await update.effective_message.reply_text("❌ لغو شد.")
+        context.user_data.pop("bad_word_prompt_chat_id", None)
+        context.user_data.pop("bad_word_prompt_message_id", None)
+
+        panel_text = f"{feedback_line}\n\n{_bad_words_text(chat_id)}"
+        panel_kb = _bad_words_keyboard(chat_id)
+
+        # پاک کردن پیامی که کاربر تایپ کرد، تا فقط یه پیام (پنل) بمونه
+        try:
+            await update.effective_message.delete()
+        except Exception:
+            pass
+
+        if prompt_chat_id and prompt_message_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=prompt_chat_id, message_id=prompt_message_id,
+                    text=panel_text, reply_markup=panel_kb
+                )
+                return
+            except Exception:
+                pass
+        # اگه ویرایش ممکن نبود (مثلاً پیام خیلی قدیمی شده)، به‌عنوان جایگزین یه پیام جدید بفرست
+        await update.effective_message.reply_text(panel_text, reply_markup=panel_kb)
+
+    if text == "/cancel":
+        await _finish("❌ لغو شد.")
         return True
 
     if not text:
-        await update.effective_message.reply_text("❗️ یه کلمه بفرست.")
+        # کلمه‌ی خالی: فقط دوباره همون پیام "لطفاً کلمه بفرست" رو نگه می‌داریم
+        try:
+            await update.effective_message.delete()
+        except Exception:
+            pass
         return True
 
     db.add_bad_word(chat_id, text)
-    context.user_data.pop("waiting_for_bad_word_chat_id", None)
-
-    await update.effective_message.reply_text(f"✔ کلمه‌ی «{text}» اضافه شد.")
-    await _render_bad_words_panel(update, context, chat_id, via_query=False)
+    await _finish(f"✔ کلمه‌ی «{text}» اضافه شد.")
     return True
 
 
