@@ -94,7 +94,10 @@ def _group_panel_keyboard(chat_id, group):
             InlineKeyboardButton("🌐 ترجمه", callback_data=f"tr_panel:{chat_id}"),
             InlineKeyboardButton("🧹 پاک‌سازی خودکار", callback_data=f"cln_panel:{chat_id}"),
         ],
-        [InlineKeyboardButton("🗣 زبان عکس قیمت‌ها", callback_data=f"imglang_panel:{chat_id}")],
+        [
+            InlineKeyboardButton("🗣 زبان عکس قیمت‌ها", callback_data=f"imglang_panel:{chat_id}"),
+            InlineKeyboardButton("🚫 کلمات غیرمجاز", callback_data=f"badwords_panel:{chat_id}"),
+        ],
         [InlineKeyboardButton("⬅️ بازگشت به لیست گروه‌ها", callback_data="panel_my_groups")],
     ])
 
@@ -606,3 +609,131 @@ async def clear_reports_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.clear_reports(chat_id)
     await query.answer("پاک شد ✔")
     await show_reports_list(update, context)
+
+
+# ---------------------------------------------------------------------------
+# مدیریت کلمات غیرمجاز (نمایش لیست / افزودن / حذف)
+# ---------------------------------------------------------------------------
+
+def _get_chat_specific_bad_words(chat_id):
+    """فقط کلماتی که مخصوص همین گروهن (نه کلمات پیش‌فرض سراسری که بین همه گروه‌ها مشترکن)"""
+    with db.get_conn() as conn:
+        c = conn.cursor()
+        c.execute("SELECT word FROM bad_words WHERE chat_id=?", (chat_id,))
+        return [r["word"] for r in c.fetchall()]
+
+
+def _bad_words_text(chat_id):
+    words = _get_chat_specific_bad_words(chat_id)
+    lines = ["🚫 کلمات غیرمجاز این گروه\n"]
+    if not words:
+        lines.append("هنوز کلمه‌ای اختصاصی برای این گروه اضافه نشده.\n(کلمات پیش‌فرض مشترک بین همه گروه‌ها همچنان فعالن.)")
+    else:
+        lines.append("روی هرکدوم بزن تا حذفش کنی:")
+    return "\n".join(lines)
+
+
+def _bad_words_keyboard(chat_id):
+    words = _get_chat_specific_bad_words(chat_id)
+    rows_kb = []
+    for idx, word in enumerate(words):
+        rows_kb.append([InlineKeyboardButton(f"🗑 {word}", callback_data=f"badwords_del:{chat_id}:{idx}")])
+    rows_kb.append([InlineKeyboardButton("➕ افزودن کلمه جدید", callback_data=f"badwords_add:{chat_id}")])
+    rows_kb.append([InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")])
+    return InlineKeyboardMarkup(rows_kb)
+
+
+async def _render_bad_words_panel(update_or_query, context, chat_id, via_query=True):
+    text = _bad_words_text(chat_id)
+    kb = _bad_words_keyboard(chat_id)
+    if via_query:
+        await update_or_query.edit_message_text(text, reply_markup=kb)
+    else:
+        await update_or_query.effective_message.reply_text(text, reply_markup=kb)
+
+
+async def open_bad_words_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = int(query.data.split(":")[1])
+    user = update.effective_user
+
+    if not await _user_can_see_group(context.bot, user.id, chat_id):
+        await query.answer("⛔️ اجازه ندارید.", show_alert=True)
+        return
+
+    await _render_bad_words_panel(query, context, chat_id, via_query=True)
+
+
+async def ask_add_bad_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = int(query.data.split(":")[1])
+    user = update.effective_user
+
+    if not await _user_can_see_group(context.bot, user.id, chat_id):
+        await query.answer("⛔️ اجازه ندارید.", show_alert=True)
+        return
+
+    context.user_data["waiting_for_bad_word_chat_id"] = chat_id
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"badwords_panel:{chat_id}")]
+    ])
+    await query.edit_message_text(
+        "➕ افزودن کلمه غیرمجاز\n\n"
+        "لطفاً کلمه‌ای که می‌خوای فیلتر بشه رو تایپ و ارسال کن.\n"
+        "برای لغو، دستور /cancel رو بفرست.",
+        reply_markup=kb
+    )
+
+
+async def receive_bad_word_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت متن کلمه‌ی جدید (باید تو guarded_private_text چک بشه)"""
+    chat_id = context.user_data.get("waiting_for_bad_word_chat_id")
+    if not chat_id:
+        return False
+
+    user = update.effective_user
+    if not await _user_can_see_group(context.bot, user.id, chat_id):
+        return False
+
+    text = (update.effective_message.text or "").strip()
+    if text == "/cancel":
+        context.user_data.pop("waiting_for_bad_word_chat_id", None)
+        await update.effective_message.reply_text("❌ لغو شد.")
+        return True
+
+    if not text:
+        await update.effective_message.reply_text("❗️ یه کلمه بفرست.")
+        return True
+
+    db.add_bad_word(chat_id, text)
+    context.user_data.pop("waiting_for_bad_word_chat_id", None)
+
+    await update.effective_message.reply_text(f"✔ کلمه‌ی «{text}» اضافه شد.")
+    await _render_bad_words_panel(update, context, chat_id, via_query=False)
+    return True
+
+
+async def delete_bad_word_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    _, chat_id, idx = query.data.split(":")
+    chat_id, idx = int(chat_id), int(idx)
+    user = update.effective_user
+
+    if not await _user_can_see_group(context.bot, user.id, chat_id):
+        await query.answer("⛔️ اجازه ندارید.", show_alert=True)
+        return
+
+    words = _get_chat_specific_bad_words(chat_id)
+    if 0 <= idx < len(words):
+        word = words[idx]
+        # حذف امن: فقط ردیف مخصوص همین گروه پاک می‌شه، نه کلمات پیش‌فرض سراسری
+        with db.get_conn() as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM bad_words WHERE word=? AND chat_id=?", (word, chat_id))
+        await query.answer("✔ حذف شد")
+    else:
+        await query.answer("این کلمه دیگه پیدا نشد.")
+
+    await _render_bad_words_panel(query, context, chat_id, via_query=True)
