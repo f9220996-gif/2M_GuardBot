@@ -2,11 +2,19 @@
 """
 فیلتر فحش و سیستم اخطار خودکار:
 اخطار ۱، اخطار ۲، اخطار ۳ -> دفعه ۴: سکوت ۵ دقیقه -> دفعه ۵: سکوت ۱۰ دقیقه -> دفعه ۶: بن کامل
+
+نکته‌ی مهم: وقتی ربات با API (بدون parse_mode) پیام می‌فرسته، تلگرام خودکار
+"@یوزرنیم" رو به یه منشن واقعی (entity) تبدیل نمی‌کنه - فقط متن ساده‌ست.
+برای همین اینجا از یه لینک واقعی (tg://user?id=...) با HTML استفاده می‌کنیم
+تا تلگرام قطعاً یه "text_mention" واقعی (با آیدی کاربر) بسازه. این باعث می‌شه
+بعداً بشه با ریپلای روی همین پیام‌ها (مثلاً برای "آزاد کن")، کاربر واقعی رو
+پیدا کرد - حتی برای کاربرایی که یوزرنیم هم ندارن.
 """
 
 import time
 import re
 from datetime import datetime, timedelta
+from html import escape
 
 from telegram import Update, ChatPermissions
 from telegram.ext import ContextTypes
@@ -22,7 +30,7 @@ def normalize(text: str) -> str:
     return re.sub(r"[\s\.\-_\*]+", "", text)
 
 
-def contains_bad_word(text: str, bad_words) -> str | None:
+def contains_bad_word(text: str, bad_words):
     if not text:
         return None
     norm_text = normalize(text)
@@ -30,11 +38,20 @@ def contains_bad_word(text: str, bad_words) -> str | None:
     for word in bad_words:
         if not word:
             continue
-        if word in text or word in lower_text:
+        if word in text or word.lower() in lower_text:
             return word
         if normalize(word) in norm_text:
             return word
     return None
+
+
+def _display_name(user):
+    return f"@{user.username}" if user.username else user.full_name
+
+
+def _mention_html(user_id, display_name):
+    """لینک HTML که تلگرام حتماً ازش یه text_mention واقعی (با آیدی کاربر) می‌سازه"""
+    return f'<a href="tg://user?id={user_id}">{escape(display_name)}</a>'
 
 
 async def _delete_message_later(context: ContextTypes.DEFAULT_TYPE):
@@ -47,7 +64,7 @@ async def _delete_message_later(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """این تابع روی هر پیام متنی گروه اجرا می‌شود"""
+    """این تابع روی هر پیام متنی گروه اجرا می‌شود (باید در main.py رجیستر شود)"""
     message = update.effective_message
     chat = update.effective_chat
     user = update.effective_user
@@ -56,10 +73,6 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
         return
     if not user or user.is_bot:
         return
-
-    # ===== حذف چک ai_moderation =====
-    # فیلتر فحش همیشه طبق تنظیمات گروه کار میکنه
-    # ===============================
 
     group = db.get_group(chat.id)
     if group and not group["is_active"]:
@@ -84,7 +97,8 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
     except Exception:
         pass
 
-    username = f"@{user.username}" if user.username else user.full_name
+    username = _display_name(user)  # برای ذخیره‌ی ساده تو دیتابیس (بدون HTML)
+    mention = _mention_html(user.id, username)  # برای نمایش تو پیام (با لینک واقعی)
 
     current_count = db.get_active_warning_count(chat.id, user.id)
     new_level = current_count + 1
@@ -96,10 +110,10 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
         text_out = wt["text"] if wt and wt["text"] else f"اخطار {new_level}/3"
         warning_msg = await context.bot.send_message(
             chat.id,
-            f"⚠️ {username}\n{text_out}",
-            reply_to_message_id=None,
+            f"⚠️ {mention}\n{escape(text_out)}",
+            parse_mode="HTML",
         )
-        # این پیام اخطار بعد از ۱ دقیقه خودکار پاک می‌شود
+        # این پیام اخطار بعد از ۱ دقیقه خودکار پاک می‌شود تا گروه شلوغ نشود
         context.job_queue.run_once(
             _delete_message_later, when=60,
             data={"chat_id": chat.id, "message_id": warning_msg.message_id},
@@ -136,12 +150,15 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
             pass
         db.add_mute(chat.id, user.id, username, "تکرار استفاده از الفاظ نامناسب (اخطار خودکار)", True, until_ts)
         which = "اول" if new_level == 4 else "دوم"
+        restriction_text = escape(build_restriction_message(until_dt_display, chat.title))
         mute_msg = await context.bot.send_message(
             chat.id,
-            f"🔇 {username}\n"
+            f"🔇 {mention}\n"
             f"به دلیل تکرار بی‌ادبی، سکوت {which} فعال شد.\n"
-            f"{build_restriction_message(until_dt_display, chat.title)}"
+            f"{restriction_text}",
+            parse_mode="HTML",
         )
+        # این پیام تا زمانی که خودِ سکوت تموم بشه می‌مونه، بعدش خودکار پاک می‌شه
         context.job_queue.run_once(
             _delete_message_later, when=minutes * 60,
             data={"chat_id": chat.id, "message_id": mute_msg.message_id},
@@ -156,5 +173,6 @@ async def check_message_for_bad_words(update: Update, context: ContextTypes.DEFA
         db.add_ban(chat.id, user.id, username, "تکرار سه‌باره بی‌ادبی پس از اخطار و سکوت", True)
         await context.bot.send_message(
             chat.id,
-            f"⛔️ {username}\nبه دلیل تکرار سه‌باره بی‌ادبی، به‌صورت کامل از گروه بن شد."
-    )
+            f"⛔️ {mention}\nبه دلیل تکرار سه‌باره بی‌ادبی، به‌صورت کامل از گروه بن شد.",
+            parse_mode="HTML",
+        )
