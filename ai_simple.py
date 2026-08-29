@@ -4,6 +4,8 @@ import google.generativeai as genai
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
+import database as db
+
 # ===== Gemini =====
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 if GOOGLE_API_KEY:
@@ -79,7 +81,8 @@ async def ai_private_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     user = update.effective_user
-    if not user:
+    chat = update.effective_chat
+    if not user or not chat:
         return
     
     text = update.message.text.strip()
@@ -94,9 +97,23 @@ async def ai_private_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply = await get_ai_response(text, model_type)
     
     await thinking.delete()
-    await update.message.reply_text(
+
+    # ===== پاک کردن پنل/پیام قبلی، چون این پیام با دکمه «بازگشت» جاش رو می‌گیره =====
+    old_msg_id = db.get_setting(f"panel_msg_{chat.id}")
+    if old_msg_id:
+        try:
+            await context.bot.delete_message(chat.id, int(old_msg_id))
+        except Exception:
+            pass
+    # ===================================================================================
+
+    sent = await update.message.reply_text(
         reply,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]
         ])
     )
+
+    # ===== ثبت این پیام به‌عنوان «پنل فعلی» =====
+    db.set_setting(f"panel_msg_{chat.id}", str(sent.message_id))
+    # ===============================================
