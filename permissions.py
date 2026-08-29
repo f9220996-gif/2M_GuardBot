@@ -2,7 +2,7 @@
 """
 توابع کمکی برای:
  - تشخیص سطح دسترسی (سازنده ربات / مالک گروه / مدیر / کاربر عادی)
- - پارس کردن رشته‌های زمانی مثل "5h" "10m30s" "1h20m"
+ - پارس کردن رشته‌های زمانی مثل "5h" "10m30s" "1h20m" و یک عدد ساده مثل "10"
 """
 
 import re
@@ -12,15 +12,19 @@ import database as db
 from config import CREATOR_ID
 
 TIME_PATTERN = re.compile(r"(\d+)\s*(h|m|s|ساعت|دقیقه|ثانیه)", re.IGNORECASE)
+# اگه فقط یه عدد تنها (بدون هیچ واحدی) نوشته بشه، مثل "سکوت 10"
+BARE_NUMBER_PATTERN = re.compile(r"^\s*(\d+)\s*$")
 
 
 def parse_duration_seconds(text: str):
     """
     ورودی مثل '5h' یا '10m' یا '1h30m' یا '45s' را به ثانیه تبدیل می‌کند.
+    اگه فقط یه عدد ساده بدون واحد باشه (مثل '10')، به‌عنوان دقیقه در نظر گرفته می‌شه.
     اگر چیزی پیدا نشود None برمی‌گرداند.
     """
     if not text:
         return None
+
     total = 0
     found = False
     for amount, unit in TIME_PATTERN.findall(text):
@@ -33,7 +37,17 @@ def parse_duration_seconds(text: str):
             total += amount * 60
         elif unit in ("s", "ثانیه"):
             total += amount
-    return total if found else None
+
+    if found:
+        return total
+
+    # ===== حالت عدد تنها (بدون واحد) → دقیقه در نظر گرفته می‌شه =====
+    bare = BARE_NUMBER_PATTERN.match(text.strip())
+    if bare:
+        return int(bare.group(1)) * 60
+    # ==================================================================
+
+    return None
 
 
 async def is_creator(user_id: int) -> bool:
