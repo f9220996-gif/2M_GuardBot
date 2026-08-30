@@ -140,11 +140,13 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _build_join_message(bot, chat):
-    """پیام کامل هنگام نصب ربات تو یه گروه: مالک گروه، وضعیت ادمین بودن ربات، و وضعیت قابلیت‌ها"""
+    """پیام کامل هنگام نصب ربات تو یه گروه: مالک گروه، لیست ادمین‌ها، وضعیت ادمین بودن ربات، و وضعیت قابلیت‌ها"""
     try:
         admins = await bot.get_chat_administrators(chat.id)
     except Exception:
         admins = []
+
+    me = await bot.get_me()
 
     owner = next((a.user for a in admins if a.status == "creator"), None)
     if owner:
@@ -152,7 +154,12 @@ async def _build_join_message(bot, chat):
     else:
         owner_name = "نامشخص"
 
-    me = await bot.get_me()
+    other_admins = [
+        a.user for a in admins
+        if a.status == "administrator" and not a.user.is_bot
+    ]
+    admin_names = [f"• {f'@{u.username}' if u.username else u.full_name}" for u in other_admins]
+
     bot_member = next((a for a in admins if a.user.id == me.id), None)
     is_full_admin = bool(
         bot_member
@@ -162,29 +169,35 @@ async def _build_join_message(bot, chat):
     )
 
     lines = [
-        "📗 ربات با موفقیت در گروه نصب شد",
+        "📗 ربات با موفقیت در این گروه نصب شد.",
         "",
         "➕ مالک گروه:",
         f"▸ {owner_name}",
         "",
     ]
 
+    if admin_names:
+        lines.append("👮 ادمین‌های گروه:")
+        lines.extend(admin_names)
+        lines.append("")
+
     if is_full_admin:
-        lines.append("✅ ربات ادمین کامل است.")
+        lines.append("✔ ربات ادمین کامل این گروه است.")
     else:
         lines.append(
-            "⚠️ ادمین کامل برای ربات یافت نشد!\n"
-            "لطفاً دسترسی «حذف پیام» و «محدود کردن اعضا» رو به ربات بده تا همه‌ی قابلیت‌ها فعال بشن."
+            "⚠️ ربات هنوز ادمین کامل نیست.\n"
+            "برای فعال شدن همه‌ی قابلیت‌ها، لطفاً از تنظیمات گروه، دسترسی «حذف پیام» و «محدود کردن اعضا» رو به ربات بده."
         )
     lines.append("")
 
     lines.append("🛠 وضعیت پیش‌فرض قابلیت‌ها:")
+    lines.append("")
     for key, label in db.TOGGLEABLE_FEATURES.items():
         enabled = db.is_feature_enabled(chat.id, key)
-        lines.append(f"{label} {'✅' if enabled else '❌'}")
+        lines.append(f"{'✔' if enabled else '✘'} {label}")
     lines.append("")
 
-    lines.append("📚 برای مدیریت کامل این گروه (تنظیمات، اخطارها، پاک‌سازی خودکار و...)، به پی‌وی ربات برو و از پنل مدیریت استفاده کن.")
+    lines.append("📚 برای مدیریت کامل این گروه (تنظیمات، اخطارها، پاک‌سازی خودکار و موارد دیگر)، به پی‌وی ربات مراجعه کن و از پنل مدیریت استفاده کن.")
 
     return "\n".join(lines)
 
