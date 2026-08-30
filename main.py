@@ -139,6 +139,56 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await check_message_for_bad_words(update, context)
 
 
+async def _build_join_message(bot, chat):
+    """پیام کامل هنگام نصب ربات تو یه گروه: مالک گروه، وضعیت ادمین بودن ربات، و وضعیت قابلیت‌ها"""
+    try:
+        admins = await bot.get_chat_administrators(chat.id)
+    except Exception:
+        admins = []
+
+    owner = next((a.user for a in admins if a.status == "creator"), None)
+    if owner:
+        owner_name = f"@{owner.username}" if owner.username else owner.full_name
+    else:
+        owner_name = "نامشخص"
+
+    me = await bot.get_me()
+    bot_member = next((a for a in admins if a.user.id == me.id), None)
+    is_full_admin = bool(
+        bot_member
+        and bot_member.status == "administrator"
+        and getattr(bot_member, "can_delete_messages", False)
+        and getattr(bot_member, "can_restrict_members", False)
+    )
+
+    lines = [
+        "📗 ربات با موفقیت در گروه نصب شد",
+        "",
+        "➕ مالک گروه:",
+        f"▸ {owner_name}",
+        "",
+    ]
+
+    if is_full_admin:
+        lines.append("✅ ربات ادمین کامل است.")
+    else:
+        lines.append(
+            "⚠️ ادمین کامل برای ربات یافت نشد!\n"
+            "لطفاً دسترسی «حذف پیام» و «محدود کردن اعضا» رو به ربات بده تا همه‌ی قابلیت‌ها فعال بشن."
+        )
+    lines.append("")
+
+    lines.append("🛠 وضعیت پیش‌فرض قابلیت‌ها:")
+    for key, label in db.TOGGLEABLE_FEATURES.items():
+        enabled = db.is_feature_enabled(chat.id, key)
+        lines.append(f"{label} {'✅' if enabled else '❌'}")
+    lines.append("")
+
+    lines.append("📚 برای مدیریت کامل این گروه (تنظیمات، اخطارها، پاک‌سازی خودکار و...)، به پی‌وی ربات برو و از پنل مدیریت استفاده کن.")
+
+    return "\n".join(lines)
+
+
 async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message or not message.new_chat_members:
@@ -153,23 +203,22 @@ async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE
         added_by_user_id=adder.id if adder else None,
         added_by_username=(f"@{adder.username}" if adder and adder.username else (adder.full_name if adder else None))
     )
-    try:
-        await context.bot.send_message(
-            chat.id,
-            "✔ ربات با موفقیت اضافه شد!\nبرای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
-        )
-    except Exception:
-        pass
+    # نکته: پیام خوش‌آمد نصب اینجا فرستاده نمی‌شه، چون این رویداد معمولاً
+    # همزمان با my_chat_member (در on_bot_added_to_group) هم فایر می‌شه؛
+    # برای جلوگیری از فرستادن پیام تکراری، فقط اونجا فرستاده می‌شه.
 
 
 async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result: ChatMemberUpdated = update.my_chat_member
     if not result:
         return
+    old_status = result.old_chat_member.status
     new_status = result.new_chat_member.status
     chat = result.chat
     if chat.type not in ("group", "supergroup"):
         return
+    # فقط وقتی واقعاً "تازه اضافه شده" (نه هر ارتقا/تنزل رتبه‌ای که وضعیتش بازم member/administrator بمونه)
+    just_joined = old_status in ("left", "kicked") and new_status in ("member", "administrator")
     if new_status in ("member", "administrator"):
         adder = result.from_user
         db.upsert_group(
@@ -177,13 +226,12 @@ async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TY
             added_by_user_id=adder.id if adder else None,
             added_by_username=(f"@{adder.username}" if adder and adder.username else (adder.full_name if adder else None))
         )
-        try:
-            await context.bot.send_message(
-                chat.id,
-                "✔ ربات با موفقیت اضافه شد!\nبرای فعال شدن کامل قابلیت‌ها، لطفاً به من دسترسی ادمین کامل بدهید."
-            )
-        except Exception:
-            pass
+        if just_joined:
+            try:
+                text = await _build_join_message(context.bot, chat)
+                await context.bot.send_message(chat.id, text)
+            except Exception:
+                pass
 
 
 async def on_start_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
