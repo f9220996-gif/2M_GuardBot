@@ -7,10 +7,18 @@
 
 import os
 import sys
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 import database as db
 from config import CREATOR_ID
+
+# کیبورد ثابت پایین صفحه که تو زیرصفحه‌های پنل نشون داده می‌شه (نه تو منوی اصلی)
+# تا کاربر بتونه با دکمه‌ی «صفحه قبل» یه قدم برگرده. handle_back_step تو nav.py
+# این دکمه رو مدیریت می‌کنه.
+PERSISTENT_KEYBOARD = ReplyKeyboardMarkup(
+    [["◀️ صفحه قبل"]],
+    resize_keyboard=True
+)
 
 START_TEXT = (
     "🤖 سلام! عزیز\n\n"
