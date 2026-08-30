@@ -10,7 +10,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
 import database as db
-from permissions import is_creator, is_group_owner
+from permissions import is_creator, can_access_dm_panel, is_telegram_group_creator
 from persian_date import tehran_from_ts, utc_from_ts
 
 
@@ -21,9 +21,7 @@ def _fmt_time(ts):
 
 
 async def _user_can_see_group(bot, user_id, chat_id):
-    if await is_creator(user_id):
-        return True
-    return await is_group_owner(chat_id, user_id)
+    return await can_access_dm_panel(bot, chat_id, user_id)
 
 
 async def show_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -35,10 +33,15 @@ async def show_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await is_creator(user.id):
         groups = db.get_all_groups()
     else:
-        groups = db.get_groups_added_by(user.id)
+        # لیست فقط شامل گروه‌هایی می‌شه که این کاربر واقعاً مالک تلگرامیِ
+        # خودِ گروهه (نه هرکسی که ربات رو اضافه کرده)
+        groups = []
+        for g in db.get_all_groups():
+            if await is_telegram_group_creator(context.bot, g["chat_id"], user.id):
+                groups.append(g)
 
     if not groups:
-        text = "شما هنوز ربات رو به هیچ گروهی اضافه نکردید."
+        text = "شما مالک هیچ گروهی که ربات توشه نیستید."
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]
         ])
