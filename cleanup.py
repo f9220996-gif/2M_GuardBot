@@ -19,7 +19,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
 import database as db
-from permissions import is_creator, is_group_owner
+from permissions import is_creator, can_access_dm_panel
 
 SECONDS_PER_DAY = 86400
 
@@ -62,9 +62,7 @@ async def _sweep_oldest_messages(bot, chat_id, count):
 
 
 async def _user_can_manage(bot, user_id, chat_id):
-    if await is_creator(user_id):
-        return True
-    return await is_group_owner(chat_id, user_id)
+    return await can_access_dm_panel(bot, chat_id, user_id)
 
 
 def _get_settings_in_days(chat_id):
