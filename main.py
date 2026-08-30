@@ -280,6 +280,11 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
 
     # ===== پی‌وی =====
+    # دکمه‌ی ثابت «صفحه قبل» باید قبل از هندلر عمومی متن پی‌وی چک بشه، وگرنه
+    # به‌جای برگشتن یه قدم، به هوش مصنوعی فرستاده می‌شه
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.Regex("^◀️ صفحه قبل$"), handle_back_step
+    ))
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, guarded_private_text
     ))
