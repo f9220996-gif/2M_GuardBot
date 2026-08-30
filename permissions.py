@@ -69,6 +69,17 @@ async def is_telegram_group_creator(bot, chat_id: int, user_id: int) -> bool:
         return False
 
 
+async def can_access_dm_panel(bot, chat_id: int, user_id: int) -> bool:
+    """
+    دسترسی به پنل مدیریت گروه تو پی‌وی: فقط سازنده‌ی ربات یا مالک واقعیِ
+    خودِ گروه (creator واقعی تلگرام). مهم نیست چه کسی ربات رو به گروه
+    اضافه کرده، و حتی ادمین‌های عادی گروه هم به این پنل دسترسی ندارن.
+    """
+    if await is_creator(user_id):
+        return True
+    return await is_telegram_group_creator(bot, chat_id, user_id)
+
+
 async def is_admin(bot, chat_id: int, user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id, user_id)
