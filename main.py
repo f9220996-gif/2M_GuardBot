@@ -315,6 +315,12 @@ def main():
         consumed = await receive_bad_word_text(update, context)
         if consumed:
             return
+        consumed = await receive_support_message(update, context)
+        if consumed:
+            return
+        consumed = await send_support_reply(update, context)
+        if consumed:
+            return
         
         text = (update.effective_message.text or "").strip()
         if text in PRICE_LOOKUP_NAMES:
@@ -324,8 +330,16 @@ def main():
             await cmd_crypto_all(update, context)
             return
 
-        # هیچ‌کدوم از حالت‌های بالا مچ نشد → جواب هوش مصنوعی (fallback)
-        await ai_private_chat(update, context)
+        # فقط اگه کاربر صراحتاً یه مدل هوش مصنوعی رو انتخاب کرده باشه، پیامش به AI می‌ره
+        if context.user_data.get("ai_chat_enabled"):
+            await ai_private_chat(update, context)
+            return
+
+        # هیچ‌کدوم از قابلیت‌های ربات مرتبط نبود -> پیام رو سریع پاک کن
+        try:
+            await update.effective_message.delete()
+        except Exception:
+            pass
 
     # ===== گیت خاموشی =====
     app.add_handler(TypeHandler(Update, global_shutdown_gate), group=-1)
@@ -354,7 +368,17 @@ def main():
         consumed = await receive_welcome_media(update, context)
         if consumed:
             return
-        await receive_warn_media(update, context)
+        consumed = await receive_warn_media(update, context)
+        if consumed:
+            return
+        consumed = await receive_support_message(update, context)
+        if consumed:
+            return
+        # هیچ حالت "منتظر مدیا"ای فعال نبود -> پیام رو سریع پاک کن
+        try:
+            await update.effective_message.delete()
+        except Exception:
+            pass
 
     app.add_handler(MessageHandler(
         filters.ChatType.PRIVATE & (filters.Sticker.ALL | filters.ANIMATION | filters.PHOTO),
@@ -474,8 +498,10 @@ def main():
     app.add_handler(CallbackQueryHandler(show_support_message, pattern="^support_show:"))
     app.add_handler(CallbackQueryHandler(support_reply, pattern="^support_reply:"))
     app.add_handler(CallbackQueryHandler(support_delete, pattern="^support_delete:"))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.TEXT | filters.PHOTO), receive_support_message))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, send_support_reply))
+    # نکته: دریافت پیام پشتیبانی و پاسخ ادمین دیگه اینجا رجیستر نمی‌شن، چون تو
+    # guarded_private_text و private_media_router (بالاتر) با اولویت درست
+    # چک می‌شن - قبلاً اینجا بودن ولی چون بعد از هندلر عمومی متن پی‌وی ثبت
+    # شده بودن، اصلاً هیچ‌وقت اجرا نمی‌شدن.
 
     # ===== Jobها =====
     app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
