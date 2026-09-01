@@ -21,11 +21,15 @@ def _warnedit_panel_content(chat_id):
         "روی هر دکمه کلیک کنید تا آن سطح را ویرایش کنید:"
     )
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚠️ اخطار ۱", callback_data=f"warnedit_lvl:{chat_id}:1")],
-        [InlineKeyboardButton("⚠️ اخطار ۲", callback_data=f"warnedit_lvl:{chat_id}:2")],
-        [InlineKeyboardButton("⚠️ اخطار ۳", callback_data=f"warnedit_lvl:{chat_id}:3")],
-        [InlineKeyboardButton("🔇 سکوت ۵ دقیقه", callback_data=f"warnedit_lvl:{chat_id}:4")],
-        [InlineKeyboardButton("🔇 سکوت ۱۰ دقیقه", callback_data=f"warnedit_lvl:{chat_id}:5")],
+        [
+            InlineKeyboardButton("⚠️ ۱", callback_data=f"warnedit_lvl:{chat_id}:1"),
+            InlineKeyboardButton("⚠️ ۲", callback_data=f"warnedit_lvl:{chat_id}:2"),
+            InlineKeyboardButton("⚠️ ۳", callback_data=f"warnedit_lvl:{chat_id}:3"),
+        ],
+        [
+            InlineKeyboardButton("🔇 سکوت ۵ دقیقه", callback_data=f"warnedit_lvl:{chat_id}:4"),
+            InlineKeyboardButton("🔇 سکوت ۱۰ دقیقه", callback_data=f"warnedit_lvl:{chat_id}:5"),
+        ],
         [InlineKeyboardButton("⛔️ بن", callback_data=f"warnedit_lvl:{chat_id}:6")],
         [InlineKeyboardButton("🔄 بازنشانی همه", callback_data=f"warnedit_reset:{chat_id}")],
         [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")],
