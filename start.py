@@ -196,6 +196,7 @@ async def ai_use_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["ai_model"] = "gemini"
+    context.user_data["ai_chat_enabled"] = True
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]])
     await query.edit_message_text(
         "✔ **مدل Gemini فعال شد**\n\n"
@@ -210,6 +211,7 @@ async def ai_use_chatgpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["ai_model"] = "chatgpt"
+    context.user_data["ai_chat_enabled"] = True
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ بازگشت", callback_data="start_menu")]])
     await query.edit_message_text(
         "✔ **مدل ChatGPT فعال شد**\n\n"
