@@ -443,37 +443,28 @@ async def cmd_pak(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not message.reply_to_message:
-        await _reply(update, "❗️ لطفاً روی پیام مورد نظر ریپلای کن و بنویس: پاک یا پاک 10")
+        await _reply(update, "❗️ لطفاً روی پیام مورد نظر ریپلای کن و بنویس: پاک یا پاک 4")
         return
 
-    # اگه عدد جلوی «پاک» بود، اون تعداد پیام قبل از پیام ریپلای‌شده هم پاک می‌شن
-    count = 0
+    # «پاک» بدون عدد = فقط همون پیام ریپلای‌شده (یعنی مجموعاً ۱ پیام)
+    # «پاک N» = مجموعاً N پیام، از همون پیام ریپلای‌شده به عقب
+    count = 1
     if context.args and context.args[0].isdigit():
-        count = min(int(context.args[0]), 200)  # سقف ۲۰۰ تا برای جلوگیری از سوءاستفاده
+        count = max(1, min(int(context.args[0]), 200))  # سقف ۲۰۰ تا برای جلوگیری از سوءاستفاده
 
     reply_id = message.reply_to_message.message_id
-    deleted = 0
-    for msg_id in range(reply_id - count, reply_id + 1):
+
+    # اول خودِ پیام دستور رو فوری پاک می‌کنیم، بدون هیچ تأخیری، تا اصلاً دیده نشه
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    for msg_id in range(reply_id - (count - 1), reply_id + 1):
         try:
             await context.bot.delete_message(chat.id, msg_id)
-            deleted += 1
         except Exception:
             pass  # این پیام یا وجود نداشت یا قبلاً پاک شده بود
-
-    if count:
-        info_msg = await context.bot.send_message(chat.id, f"🗑 {deleted} پیام پاک شد.")
-        context.job_queue.run_once(
-            _delete_message_later, when=4,
-            data={"chat_id": chat.id, "message_id": info_msg.message_id},
-            name=f"delinfo_{chat.id}_{info_msg.message_id}"
-        )
-
-    # پیام خودِ دستور «پاک» با ۲ ثانیه تاخیر پاک می‌شود
-    context.job_queue.run_once(
-        _delete_message_later, when=2,
-        data={"chat_id": chat.id, "message_id": message.message_id},
-        name=f"delcmd_{chat.id}_{message.message_id}"
-    )
 
 
 # ---------------------------------------------------------------------------
