@@ -58,22 +58,19 @@ def _level_panel_content(chat_id, level):
     text = f"✏️ ویرایش اخطار سطح {level}\n\n"
     if wt:
         text += f"📝 متن فعلی: {wt['text'] if wt['text'] else 'تعیین نشده'}\n"
-        text += f"🎬 استیکر: {'✔' if wt['sticker_file_id'] else '✘'}\n"
-        text += f"🎞 گیف: {'✔' if wt['gif_file_id'] else '✘'}\n"
-        text += f"🖼 عکس: {'✔' if wt['photo_file_id'] else '✘'}\n\n"
+        has_media = bool(wt['sticker_file_id'] or wt['gif_file_id'] or wt['photo_file_id'])
+        text += f"🖼 مدیا: {'✔' if has_media else '✘'}\n\n"
     else:
         text += "📝 متن فعلی: تعیین نشده\n"
-        text += "🎬 استیکر: ✘\n"
-        text += "🎞 گیف: ✘\n"
-        text += "🖼 عکس: ✘\n\n"
+        text += "🖼 مدیا: ✘\n\n"
     text += "برای ویرایش، روی دکمه‌های زیر کلیک کنید:"
 
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 ویرایش متن", callback_data=f"warnedit_text:{chat_id}:{level}")],
-        [InlineKeyboardButton("🎬 افزودن استیکر", callback_data=f"warnedit_media:{chat_id}:{level}:sticker")],
-        [InlineKeyboardButton("🎞 افزودن گیف", callback_data=f"warnedit_media:{chat_id}:{level}:gif")],
-        [InlineKeyboardButton("🖼 افزودن عکس", callback_data=f"warnedit_media:{chat_id}:{level}:photo")],
-        [InlineKeyboardButton("🗑 پاک کردن مدیا", callback_data=f"warnedit_media:{chat_id}:{level}:clear")],
+        [
+            InlineKeyboardButton("🖼 افزودن مدیا", callback_data=f"warnedit_media:{chat_id}:{level}:any"),
+            InlineKeyboardButton("🗑 پاک کردن مدیا", callback_data=f"warnedit_media:{chat_id}:{level}:clear"),
+        ],
         [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"warnedit_panel:{chat_id}")],
     ])
     return text, kb
@@ -189,7 +186,8 @@ async def ask_warn_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     media_names = {
         "sticker": "استیکر",
         "gif": "گیف",
-        "photo": "عکس"
+        "photo": "عکس",
+        "any": "استیکر، گیف یا عکس"
     }
 
     context.user_data["waiting_for_warn_media"] = (chat_id, level, media_type)
@@ -200,7 +198,7 @@ async def ask_warn_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"warnedit_lvl:{chat_id}:{level}")]
     ])
     await query.edit_message_text(
-        f"🎬 افزودن {media_names.get(media_type, 'مدیا')} به اخطار سطح {level}\n\n"
+        f"🖼 افزودن مدیا به اخطار سطح {level}\n\n"
         f"لطفاً یک {media_names.get(media_type, 'مدیا')} ارسال کنید.\n\n"
         "برای لغو، دستور /cancel را بفرستید.",
         reply_markup=kb
@@ -225,26 +223,27 @@ async def receive_warn_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _return_to_level_panel(update, context, chat_id, level)
         return True
 
+    file_kind = None
     file_id = None
-    if media_type == "sticker" and message.sticker:
-        file_id = message.sticker.file_id
-    elif media_type == "gif" and message.animation:
-        file_id = message.animation.file_id
-    elif media_type == "photo" and message.photo:
-        file_id = message.photo[-1].file_id
+    if media_type in ("sticker", "any") and message.sticker:
+        file_kind, file_id = "sticker", message.sticker.file_id
+    elif media_type in ("gif", "any") and message.animation:
+        file_kind, file_id = "gif", message.animation.file_id
+    elif media_type in ("photo", "any") and message.photo:
+        file_kind, file_id = "photo", message.photo[-1].file_id
     else:
         try:
             await message.delete()
         except Exception:
             pass
-        warn = await message.reply_text("❌ نوع مدیا اشتباه است. لطفاً دوباره ارسال کنید یا /cancel رو بفرستید.")
+        await message.reply_text("❌ نوع مدیا اشتباه است. لطفاً یه استیکر، گیف یا عکس بفرست، یا /cancel رو بفرست.")
         return True
 
-    if media_type == "sticker":
+    if file_kind == "sticker":
         db.set_warning_text(chat_id, level, sticker_file_id=file_id)
-    elif media_type == "gif":
+    elif file_kind == "gif":
         db.set_warning_text(chat_id, level, gif_file_id=file_id)
-    elif media_type == "photo":
+    elif file_kind == "photo":
         db.set_warning_text(chat_id, level, photo_file_id=file_id)
 
     context.user_data["waiting_for_warn_media"] = None
