@@ -25,10 +25,8 @@ DEFAULT_COMMANDS = {
     "گیف بن": "بن کردن گیف",
     "استیکر بن": "بن کردن استیکر",
     "تاس": "بازی تاس",
-    "شیر_یا_خط": "شیر یا خط",
-    "سنگ_کاغذ_قیچی": "سنگ‌کاغذقیچی",
-    "حدس_عدد": "حدس عدد",
-    "حدس": "حدس زدن",
+    "شیر یا خط": "شیر یا خط",
+    "سنگ کاغذ قیچی": "سنگ‌کاغذقیچی",
     "گزارش": "گزارش کاربر",
     "ترجمه": "ترجمه",
     "تاریخ": "تاریخ",
@@ -45,10 +43,8 @@ COMMAND_ICONS = {
     "گیف بن": "🚫",
     "استیکر بن": "🚫",
     "تاس": "🎲",
-    "شیر_یا_خط": "🪙",
-    "سنگ_کاغذ_قیچی": "✊",
-    "حدس_عدد": "🔢",
-    "حدس": "❓",
+    "شیر یا خط": "🪙",
+    "سنگ کاغذ قیچی": "✊",
     "گزارش": "📩",
     "ترجمه": "🌐",
     "تاریخ": "📅",
@@ -258,3 +254,30 @@ async def reset_all_command_aliases_cb(update: Update, context: ContextTypes.DEF
     reset_all_command_aliases(chat_id)
     await query.answer("✔ همه به پیش‌فرض برگشتن")
     await query.edit_message_text(_shortcuts_panel_text(chat_id), reply_markup=_shortcuts_panel_keyboard(chat_id))
+
+
+# ---------------------------------------------------------------------------
+# دستور «راهنما» تو خودِ گروه - همیشه کلمه‌های فعلیِ همین گروه رو نشون می‌ده
+# ---------------------------------------------------------------------------
+
+def build_group_help_text(chat_id):
+    pairs = []
+    line = []
+    for key in COMMAND_KEYS_ORDER:
+        icon = COMMAND_ICONS.get(key, "•")
+        active = get_active_keyword(chat_id, key)
+        line.append(f"{icon} {active}")
+        if len(line) == 2:
+            pairs.append("   ".join(line))
+            line = []
+    if line:
+        pairs.append("   ".join(line))
+    body = "\n".join(pairs)
+    return f"📖 راهنمای دستورات این گروه\n\n{body}"
+
+
+async def cmd_group_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    if not chat or chat.type not in ("group", "supergroup"):
+        return
+    await update.effective_message.reply_text(build_group_help_text(chat.id))
