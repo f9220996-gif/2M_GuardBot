@@ -26,7 +26,8 @@ from moderation import (
 )
 from bad_words_filter import check_message_for_bad_words
 from games import (
-    cmd_tas, cmd_shir_khat, cmd_sang_kaghaz_gheychi, cmd_hads_adad, cmd_hads
+    cmd_tas, cmd_shir_khat, cmd_sang_kaghaz_gheychi,
+    rps_join, rps_pick
 )
 from panel import (
     show_my_groups, open_group_panel, toggle_lock, toggle_active,
@@ -82,7 +83,8 @@ from tag_all import tag_all_members, tag_close, track_seen_user
 # ===== میان‌برهای قابل‌تغییر دستورات =====
 from command_shortcuts import (
     get_group_command_keywords, open_shortcuts_panel, ask_edit_command_alias,
-    receive_command_alias, reset_command_alias_cb, reset_all_command_aliases_cb
+    receive_command_alias, reset_command_alias_cb, reset_all_command_aliases_cb,
+    cmd_group_help
 )
 
 logging.basicConfig(
@@ -103,10 +105,8 @@ PERSIAN_COMMANDS = {
     "گیف بن": cmd_gif_ban,
     "استیکر بن": cmd_sticker_ban,
     "تاس": cmd_tas,
-    "شیر_یا_خط": cmd_shir_khat,
-    "سنگ_کاغذ_قیچی": cmd_sang_kaghaz_gheychi,
-    "حدس_عدد": cmd_hads_adad,
-    "حدس": cmd_hads,
+    "شیر یا خط": cmd_shir_khat,
+    "سنگ کاغذ قیچی": cmd_sang_kaghaz_gheychi,
     "گزارش": cmd_gozaresh,
     "ترجمه": cmd_tarjome,
     "تاریخ": cmd_tarikh,
@@ -114,7 +114,7 @@ PERSIAN_COMMANDS = {
 }
 
 PRICE_LOOKUP_NAMES = set(SYMBOL_MAP.keys()) | set(FIAT_GOLD_MAP.keys())
-GAME_COMMANDS = {"تاس", "شیر_یا_خط", "سنگ_کاغذ_قیچی", "حدس_عدد", "حدس"}
+GAME_COMMANDS = {"تاس", "شیر یا خط", "سنگ کاغذ قیچی"}
 
 
 async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -124,6 +124,10 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (message.text or "").strip()
+
+    if text == "راهنما":
+        await cmd_group_help(update, context)
+        return
 
     # نگاشت کلمه‌ی فعلی (سفارشی یا پیش‌فرض) -> کلید اصلی، مخصوص همین گروه
     keyword_map = get_group_command_keywords(chat.id)
@@ -428,6 +432,8 @@ def main():
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, tag_all_members
     ), group=7)
     app.add_handler(CallbackQueryHandler(tag_close, pattern="^tag_close:"))
+    app.add_handler(CallbackQueryHandler(rps_join, pattern="^rps_join$"))
+    app.add_handler(CallbackQueryHandler(rps_pick, pattern="^rps_pick:"))
 
     # ===== چک لیست سیاه =====
     app.add_handler(MessageHandler(
