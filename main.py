@@ -53,7 +53,8 @@ from warnings_editor import (
     ask_warn_media, receive_warn_media, reset_warn
 )
 from translate_feature import (
-    cmd_tarjome, check_dot_translate, open_translate_panel, set_translate_lang_cb
+    cmd_tarjome, check_dot_translate, open_translate_panel, set_translate_lang_cb,
+    ask_set_translate_trigger, receive_translate_trigger
 )
 from cleanup import (
     open_cleanup_panel, toggle_cleanup, 
@@ -64,7 +65,10 @@ from nav import track_nav_state, handle_back_step
 from image_lang import open_image_lang_panel, set_image_lang_cb
 
 # ===== هوش مصنوعی =====
-from ai_simple import ai_handler, ai_private_chat
+from ai_simple import (
+    ai_handler, ai_private_chat,
+    open_ai_trigger_panel, ask_set_ai_trigger, receive_ai_trigger
+)
 
 # ===== پشتیبانی =====
 from support import (
@@ -74,6 +78,12 @@ from support import (
 
 # ===== تگ =====
 from tag_all import tag_all_members, tag_close, track_seen_user
+
+# ===== میان‌برهای قابل‌تغییر دستورات =====
+from command_shortcuts import (
+    get_group_command_keywords, open_shortcuts_panel, ask_edit_command_alias,
+    receive_command_alias, reset_command_alias_cb, reset_all_command_aliases_cb
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -105,7 +115,6 @@ PERSIAN_COMMANDS = {
 
 PRICE_LOOKUP_NAMES = set(SYMBOL_MAP.keys()) | set(FIAT_GOLD_MAP.keys())
 GAME_COMMANDS = {"تاس", "شیر_یا_خط", "سنگ_کاغذ_قیچی", "حدس_عدد", "حدس"}
-SORTED_COMMAND_KEYS = sorted(PERSIAN_COMMANDS.keys(), key=len, reverse=True)
 
 
 async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,13 +124,20 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = (message.text or "").strip()
-    for cmd_key in SORTED_COMMAND_KEYS:
-        if text == cmd_key or text.startswith(cmd_key + " "):
-            if cmd_key in GAME_COMMANDS and not db.is_feature_enabled(chat.id, "games"):
+
+    # نگاشت کلمه‌ی فعلی (سفارشی یا پیش‌فرض) -> کلید اصلی، مخصوص همین گروه
+    keyword_map = get_group_command_keywords(chat.id)
+    sorted_keywords = sorted(keyword_map.keys(), key=len, reverse=True)
+    for kw in sorted_keywords:
+        if not kw:
+            continue
+        if text == kw or text.startswith(kw + " "):
+            original_key = keyword_map[kw]
+            if original_key in GAME_COMMANDS and not db.is_feature_enabled(chat.id, "games"):
                 return
-            rest = text[len(cmd_key):].strip()
+            rest = text[len(kw):].strip()
             context.args = rest.split() if rest else []
-            await PERSIAN_COMMANDS[cmd_key](update, context)
+            await PERSIAN_COMMANDS[original_key](update, context)
             return
 
     if text in PRICE_LOOKUP_NAMES:
@@ -130,10 +146,9 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cmd_crypto_single(update, context)
         return
 
-    if text.startswith("."):
-        consumed = await check_dot_translate(update, context)
-        if consumed:
-            return
+    consumed = await check_dot_translate(update, context)
+    if consumed:
+        return
 
     if db.is_feature_enabled(chat.id, "bad_words"):
         await check_message_for_bad_words(update, context)
@@ -315,6 +330,15 @@ def main():
         consumed = await receive_bad_word_text(update, context)
         if consumed:
             return
+        consumed = await receive_translate_trigger(update, context)
+        if consumed:
+            return
+        consumed = await receive_ai_trigger(update, context)
+        if consumed:
+            return
+        consumed = await receive_command_alias(update, context)
+        if consumed:
+            return
         consumed = await receive_support_message(update, context)
         if consumed:
             return
@@ -456,6 +480,13 @@ def main():
     app.add_handler(CallbackQueryHandler(reset_warn, pattern=r"^warnedit_reset:"))
     app.add_handler(CallbackQueryHandler(open_translate_panel, pattern=r"^tr_panel:"))
     app.add_handler(CallbackQueryHandler(set_translate_lang_cb, pattern=r"^tr_set:"))
+    app.add_handler(CallbackQueryHandler(ask_set_translate_trigger, pattern=r"^tr_trigger:"))
+    app.add_handler(CallbackQueryHandler(open_ai_trigger_panel, pattern=r"^ai_trigger_panel:"))
+    app.add_handler(CallbackQueryHandler(ask_set_ai_trigger, pattern=r"^ai_trigger_set:"))
+    app.add_handler(CallbackQueryHandler(open_shortcuts_panel, pattern=r"^cmdshortcuts_panel:"))
+    app.add_handler(CallbackQueryHandler(ask_edit_command_alias, pattern=r"^cmdalias_edit:"))
+    app.add_handler(CallbackQueryHandler(reset_command_alias_cb, pattern=r"^cmdalias_reset:"))
+    app.add_handler(CallbackQueryHandler(reset_all_command_aliases_cb, pattern=r"^cmdalias_resetall:"))
     
     # ===== پاک‌سازی خودکار =====
     app.add_handler(CallbackQueryHandler(open_cleanup_panel, pattern=r"^cln_panel:"))
