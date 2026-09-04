@@ -101,7 +101,6 @@ def _group_panel_keyboard(chat_id, group):
             InlineKeyboardButton("🗣 زبان عکس قیمت‌ها", callback_data=f"imglang_panel:{chat_id}"),
             InlineKeyboardButton("🚫 کلمات غیرمجاز", callback_data=f"badwords_panel:{chat_id}"),
         ],
-        [InlineKeyboardButton("🧠 فعال‌ساز هوش مصنوعی", callback_data=f"ai_trigger_panel:{chat_id}")],
         [InlineKeyboardButton("🔤 میان‌برهای دستورات", callback_data=f"cmdshortcuts_panel:{chat_id}")],
         [InlineKeyboardButton("⬅️ بازگشت به لیست گروه‌ها", callback_data="panel_my_groups")],
     ])
@@ -442,6 +441,7 @@ def _build_features_keyboard(chat_id):
         [btn("photos"), btn("videos")],
         [btn("documents"), btn("date")],
         [btn("dollar"), btn("translate")],
+        [btn("ai_chat")],
         [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")],
     ]
     return InlineKeyboardMarkup(rows_kb)
