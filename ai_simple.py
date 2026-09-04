@@ -60,6 +60,9 @@ async def ai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chat = update.effective_chat
+    if not db.is_feature_enabled(chat.id, "ai_chat"):
+        return
+
     text = update.message.text
     bot_username = context.bot.username
     trigger = get_ai_trigger(chat.id)
@@ -151,7 +154,7 @@ def _ai_trigger_panel_text(chat_id, extra_line=None):
 def _ai_trigger_panel_keyboard(chat_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ تغییر کلمه‌ی فعال‌ساز", callback_data=f"ai_trigger_set:{chat_id}")],
-        [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")],
+        [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"cmdshortcuts_panel:{chat_id}")],
     ])
 
 
