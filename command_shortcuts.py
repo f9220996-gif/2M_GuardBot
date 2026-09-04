@@ -1,549 +1,228 @@
 # -*- coding: utf-8 -*-
 """
-فایل اصلی اجرای ربات مدیریت گروه.
-اجرا: python main.py
+میان‌برهای قابل‌تغییر دستورات گروه.
+هر گروه می‌تونه کلمه‌ی هرکدوم از دستورات (مثل «سکوت»، «بن کن»، «پاک»، ...) رو
+با یه کلمه‌ی دلخواه خودش عوض کنه. کلید اصلی (که تابع واقعی رو صدا می‌زنه)
+همیشه همون کلید پیش‌فرضه؛ فقط کلمه‌ای که کاربر تایپ می‌کنه قابل‌تغییره.
 """
 
-import logging
-
-from telegram import Update, ChatMemberUpdated
-from telegram.ext import (
-    Application, ApplicationBuilder, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ChatMemberHandler, ContextTypes, filters,
-    ApplicationHandlerStop, TypeHandler
-)
+import json
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ContextTypes
 
 import database as db
-from config import BOT_TOKEN, CREATOR_ID
+from permissions import can_access_dm_panel
 
-from start import (
-    cmd_start, on_help_button, send_start_panel, restart_bot,
-    ai_model_select, ai_use_gemini, ai_use_chatgpt
-)
-from moderation import (
-    cmd_khamoshi, cmd_roshan, cmd_sokoot, cmd_azad_kon, cmd_ban_kon, cmd_akhtar,
-    cmd_pak, cmd_gif_ban, cmd_sticker_ban, check_blacklisted_media, check_media_permissions
-)
-from bad_words_filter import check_message_for_bad_words
-from games import (
-    cmd_tas, cmd_shir_khat, cmd_sang_kaghaz_gheychi, cmd_hads_adad, cmd_hads
-)
-from panel import (
-    show_my_groups, open_group_panel, toggle_lock, toggle_active,
-    show_banned_list, show_muted_list, show_warned_list,
-    show_mute_detail, release_mute_from_panel, ask_edit_mute_duration, set_mute_duration_from_panel,
-    show_features_panel, toggle_feature, show_reports_list, clear_reports_cb,
-    open_report_detail, handle_report_action,
-    open_bad_words_panel, ask_add_bad_word, receive_bad_word_text, delete_bad_word_cb
-)
-from creator import (
-    open_creator_panel, toggle_global, ask_set_shutdown_text, receive_shutdown_text,
-    ask_set_update_msg, receive_update_msg, show_update_msg
-)
-from reports import cmd_gozaresh, send_pending_reports_job
-from persian_date import cmd_tarikh
-from crypto import cmd_crypto_all, cmd_crypto_single, SYMBOL_MAP, FIAT_GOLD_MAP
-from welcome import (
-    on_new_member_welcome, open_welcome_panel, toggle_welcome,
-    preview_welcome, reset_welcome, ask_edit_welcome, receive_welcome_text,
-    ask_add_welcome_media, receive_welcome_media, clear_welcome_media_cb
-)
-from warnings_editor import (
-    open_warnedit_panel, open_level_panel, ask_warn_text, receive_warn_text,
-    ask_warn_media, receive_warn_media, reset_warn
-)
-from translate_feature import (
-    cmd_tarjome, check_dot_translate, open_translate_panel, set_translate_lang_cb,
-    ask_set_translate_trigger, receive_translate_trigger
-)
-from cleanup import (
-    open_cleanup_panel, toggle_cleanup, 
-    track_last_message, run_auto_cleanup_job, ask_interval, adjust_interval, run_cleanup_now,
-    adjust_count, set_cleanup_count
-)
-from nav import track_nav_state, handle_back_step
-from image_lang import open_image_lang_panel, set_image_lang_cb
-
-# ===== هوش مصنوعی =====
-from ai_simple import (
-    ai_handler, ai_private_chat,
-    open_ai_trigger_panel, ask_set_ai_trigger, receive_ai_trigger
-)
-
-# ===== پشتیبانی =====
-from support import (
-    support_menu, receive_support_message, confirm_support, cancel_support,
-    support_admin_panel, show_support_message, support_reply, send_support_reply, support_delete
-)
-
-# ===== تگ =====
-from tag_all import tag_all_members, tag_close, track_seen_user
-
-# ===== میان‌برهای قابل‌تغییر دستورات =====
-from command_shortcuts import (
-    get_group_command_keywords, open_shortcuts_panel, ask_edit_command_alias,
-    receive_command_alias, reset_command_alias_cb, reset_all_command_aliases_cb
-)
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-
-PERSIAN_COMMANDS = {
-    "خاموشی": cmd_khamoshi,
-    "روشن": cmd_roshan,
-    "سکوت": cmd_sokoot,
-    "آزاد کن": cmd_azad_kon,
-    "بن کن": cmd_ban_kon,
-    "اخطار": cmd_akhtar,
-    "پاک": cmd_pak,
-    "گیف بن": cmd_gif_ban,
-    "استیکر بن": cmd_sticker_ban,
-    "تاس": cmd_tas,
-    "شیر_یا_خط": cmd_shir_khat,
-    "سنگ_کاغذ_قیچی": cmd_sang_kaghaz_gheychi,
-    "حدس_عدد": cmd_hads_adad,
-    "حدس": cmd_hads,
-    "گزارش": cmd_gozaresh,
-    "ترجمه": cmd_tarjome,
-    "تاریخ": cmd_tarikh,
-    "رمز ارز": cmd_crypto_all,
+# کلید پیش‌فرض -> برچسب فارسی نمایشی (فقط برای نمایش تو پنل)
+DEFAULT_COMMANDS = {
+    "خاموشی": "قفل کردن گروه",
+    "روشن": "باز کردن گروه",
+    "سکوت": "سکوت دادن",
+    "آزاد کن": "برداشتن سکوت",
+    "بن کن": "بن کردن",
+    "اخطار": "اخطار دادن",
+    "پاک": "پاک کردن پیام",
+    "گیف بن": "بن کردن گیف",
+    "استیکر بن": "بن کردن استیکر",
+    "تاس": "بازی تاس",
+    "شیر_یا_خط": "بازی شیر یا خط",
+    "سنگ_کاغذ_قیچی": "بازی سنگ‌کاغذقیچی",
+    "حدس_عدد": "بازی حدس عدد",
+    "حدس": "حدس زدن",
+    "گزارش": "گزارش کاربر",
+    "ترجمه": "ترجمه با ریپلای",
+    "تاریخ": "دستور تاریخ",
+    "رمز ارز": "جدول قیمت‌ها",
 }
-
-PRICE_LOOKUP_NAMES = set(SYMBOL_MAP.keys()) | set(FIAT_GOLD_MAP.keys())
-GAME_COMMANDS = {"تاس", "شیر_یا_خط", "سنگ_کاغذ_قیچی", "حدس_عدد", "حدس"}
+COMMAND_KEYS_ORDER = list(DEFAULT_COMMANDS.keys())
 
 
-async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.effective_message
-    chat = update.effective_chat
-    if not message or not chat or chat.type not in ("group", "supergroup"):
-        return
-
-    text = (message.text or "").strip()
-
-    # نگاشت کلمه‌ی فعلی (سفارشی یا پیش‌فرض) -> کلید اصلی، مخصوص همین گروه
-    keyword_map = get_group_command_keywords(chat.id)
-    sorted_keywords = sorted(keyword_map.keys(), key=len, reverse=True)
-    for kw in sorted_keywords:
-        if not kw:
-            continue
-        if text == kw or text.startswith(kw + " "):
-            original_key = keyword_map[kw]
-            if original_key in GAME_COMMANDS and not db.is_feature_enabled(chat.id, "games"):
-                return
-            rest = text[len(kw):].strip()
-            context.args = rest.split() if rest else []
-            await PERSIAN_COMMANDS[original_key](update, context)
-            return
-
-    if text in PRICE_LOOKUP_NAMES:
-        if text == "دلار" and not db.is_feature_enabled(chat.id, "dollar"):
-            return
-        await cmd_crypto_single(update, context)
-        return
-
-    consumed = await check_dot_translate(update, context)
-    if consumed:
-        return
-
-    if db.is_feature_enabled(chat.id, "bad_words"):
-        await check_message_for_bad_words(update, context)
-
-
-async def _build_join_message(bot, chat):
-    """پیام کامل هنگام نصب ربات تو یه گروه: مالک گروه، لیست ادمین‌ها، وضعیت ادمین بودن ربات، و وضعیت قابلیت‌ها"""
+def get_command_aliases(chat_id):
+    """dict: کلید پیش‌فرض -> کلمه‌ی سفارشیِ همین گروه (فقط مواردی که تغییر کردن)"""
+    raw = db.get_setting(f"cmd_aliases_{chat_id}")
+    if not raw:
+        return {}
     try:
-        admins = await bot.get_chat_administrators(chat.id)
+        return json.loads(raw)
     except Exception:
-        admins = []
+        return {}
 
-    me = await bot.get_me()
 
-    owner = next((a.user for a in admins if a.status == "creator"), None)
-    if owner:
-        owner_name = f"@{owner.username}" if owner.username else owner.full_name
-    else:
-        owner_name = "نامشخص"
+def _save_aliases(chat_id, aliases):
+    db.set_setting(f"cmd_aliases_{chat_id}", json.dumps(aliases, ensure_ascii=False))
 
-    other_admins = [
-        a.user for a in admins
-        if a.status == "administrator" and not a.user.is_bot
-    ]
-    admin_names = [f"• {f'@{u.username}' if u.username else u.full_name}" for u in other_admins]
 
-    bot_member = next((a for a in admins if a.user.id == me.id), None)
-    is_full_admin = bool(
-        bot_member
-        and bot_member.status == "administrator"
-        and getattr(bot_member, "can_delete_messages", False)
-        and getattr(bot_member, "can_restrict_members", False)
+def set_command_alias(chat_id, key, new_word):
+    aliases = get_command_aliases(chat_id)
+    aliases[key] = new_word
+    _save_aliases(chat_id, aliases)
+
+
+def reset_command_alias(chat_id, key):
+    aliases = get_command_aliases(chat_id)
+    aliases.pop(key, None)
+    _save_aliases(chat_id, aliases)
+
+
+def reset_all_command_aliases(chat_id):
+    _save_aliases(chat_id, {})
+
+
+def get_active_keyword(chat_id, key):
+    return get_command_aliases(chat_id).get(key, key)
+
+
+def get_group_command_keywords(chat_id):
+    """
+    برمی‌گردونه: {کلمه‌ی فعلی (سفارشی یا پیش‌فرض): کلید اصلی}
+    این نگاشت تو main.py برای تشخیص اینکه کاربر چی تایپ کرده استفاده می‌شه.
+    """
+    aliases = get_command_aliases(chat_id)
+    return {aliases.get(key, key): key for key in DEFAULT_COMMANDS}
+
+
+# ---------------------------------------------------------------------------
+# پنل تنظیم میان‌برها
+# ---------------------------------------------------------------------------
+
+def _shortcuts_panel_text(chat_id, extra_line=None):
+    text = (
+        "🔤 میان‌برهای دستورات گروه\n\n"
+        "هرکدوم رو بزن تا کلمه‌ای که برای اون دستور تایپ می‌کنی رو عوض کنی."
     )
-
-    lines = [
-        "📗 ربات با موفقیت در این گروه نصب شد.",
-        "",
-        "➕ مالک گروه:",
-        f"▸ {owner_name}",
-        "",
-    ]
-
-    if admin_names:
-        lines.append("👮 ادمین‌های گروه:")
-        lines.extend(admin_names)
-        lines.append("")
-
-    if is_full_admin:
-        lines.append("✔ ربات ادمین کامل این گروه است.")
-    else:
-        lines.append(
-            "⚠️ ربات هنوز ادمین کامل نیست.\n"
-            "برای فعال شدن همه‌ی قابلیت‌ها، لطفاً از تنظیمات گروه، دسترسی «حذف پیام» و «محدود کردن اعضا» رو به ربات بده."
-        )
-    lines.append("")
-
-    lines.append("🛠 وضعیت پیش‌فرض قابلیت‌ها:")
-    lines.append("")
-    for key, label in db.TOGGLEABLE_FEATURES.items():
-        enabled = db.is_feature_enabled(chat.id, key)
-        lines.append(f"{'✔' if enabled else '✘'} {label}")
-    lines.append("")
-
-    lines.append("📚 برای مدیریت کامل این گروه (تنظیمات، اخطارها، پاک‌سازی خودکار و موارد دیگر)، به پی‌وی ربات مراجعه کن و از پنل مدیریت استفاده کن.")
-
-    return "\n".join(lines)
+    if extra_line:
+        text = f"{extra_line}\n\n{text}"
+    return text
 
 
-async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.effective_message
-    if not message or not message.new_chat_members:
-        return
-    me = await context.bot.get_me()
-    if me.id not in [m.id for m in message.new_chat_members]:
-        return
-    chat = update.effective_chat
-    adder = message.from_user
-    db.upsert_group(
-        chat.id, chat.title,
-        added_by_user_id=adder.id if adder else None,
-        added_by_username=(f"@{adder.username}" if adder and adder.username else (adder.full_name if adder else None))
-    )
-    # نکته: پیام خوش‌آمد نصب اینجا فرستاده نمی‌شه، چون این رویداد معمولاً
-    # همزمان با my_chat_member (در on_bot_added_to_group) هم فایر می‌شه؛
-    # برای جلوگیری از فرستادن پیام تکراری، فقط اونجا فرستاده می‌شه.
+def _shortcuts_panel_keyboard(chat_id):
+    rows = []
+    for i, key in enumerate(COMMAND_KEYS_ORDER):
+        label = DEFAULT_COMMANDS[key]
+        active = get_active_keyword(chat_id, key)
+        rows.append([InlineKeyboardButton(f"{label}: «{active}»", callback_data=f"cmdalias_edit:{chat_id}:{i}")])
+    rows.append([InlineKeyboardButton("🔄 بازنشانی همه به پیش‌فرض", callback_data=f"cmdalias_resetall:{chat_id}")])
+    rows.append([InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")])
+    return InlineKeyboardMarkup(rows)
 
 
-async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result: ChatMemberUpdated = update.my_chat_member
-    if not result:
-        return
-    old_status = result.old_chat_member.status
-    new_status = result.new_chat_member.status
-    chat = result.chat
-    if chat.type not in ("group", "supergroup"):
-        return
-    # فقط وقتی واقعاً "تازه اضافه شده" (نه هر ارتقا/تنزل رتبه‌ای که وضعیتش بازم member/administrator بمونه)
-    just_joined = old_status in ("left", "kicked") and new_status in ("member", "administrator")
-    if new_status in ("member", "administrator"):
-        adder = result.from_user
-        db.upsert_group(
-            chat.id, chat.title,
-            added_by_user_id=adder.id if adder else None,
-            added_by_username=(f"@{adder.username}" if adder and adder.username else (adder.full_name if adder else None))
-        )
-        if just_joined:
-            try:
-                text = await _build_join_message(context.bot, chat)
-                await context.bot.send_message(chat.id, text)
-            except Exception:
-                pass
-
-
-async def on_start_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from start import build_start_keyboard, START_TEXT
+async def open_shortcuts_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    bot_username = (await context.bot.get_me()).username
+    chat_id = int(query.data.split(":")[1])
+    user = update.effective_user
+
+    if not await can_access_dm_panel(context.bot, chat_id, user.id):
+        await query.answer("⛔️ اجازه ندارید.", show_alert=True)
+        return
+
+    await query.edit_message_text(_shortcuts_panel_text(chat_id), reply_markup=_shortcuts_panel_keyboard(chat_id))
+
+
+async def ask_edit_command_alias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    _, chat_id, idx = query.data.split(":")
+    chat_id, idx = int(chat_id), int(idx)
+    user = update.effective_user
+
+    if not await can_access_dm_panel(context.bot, chat_id, user.id):
+        await query.answer("⛔️ اجازه ندارید.", show_alert=True)
+        return
+
+    if idx < 0 or idx >= len(COMMAND_KEYS_ORDER):
+        await query.answer("این مورد پیدا نشد.", show_alert=True)
+        return
+    key = COMMAND_KEYS_ORDER[idx]
+    await query.answer()
+
+    context.user_data["waiting_cmdalias"] = (chat_id, key)
+    context.user_data["cmdalias_prompt_chat_id"] = query.message.chat_id
+    context.user_data["cmdalias_prompt_message_id"] = query.message.message_id
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("↩️ برگردوندن به پیش‌فرض", callback_data=f"cmdalias_reset:{chat_id}:{idx}")],
+        [InlineKeyboardButton("⬅️ انصراف", callback_data=f"cmdshortcuts_panel:{chat_id}")],
+    ])
     await query.edit_message_text(
-        START_TEXT,
-        reply_markup=build_start_keyboard(update.effective_user.id, bot_username)
+        f"✏️ کلمه‌ی جدید برای «{DEFAULT_COMMANDS[key]}» رو بفرست.\n\n"
+        f"پیش‌فرض: «{key}»\n"
+        f"فعلی: «{get_active_keyword(chat_id, key)}»\n\n"
+        "برای لغو، دستور /cancel را بفرستید.",
+        reply_markup=kb
     )
 
 
-# ===== گیت خاموشی سراسری =====
-async def global_shutdown_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if db.is_global_active():
-        return
-    
+async def receive_command_alias(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    pending = context.user_data.get("waiting_cmdalias")
+    if not pending:
+        return False
+    chat_id, key = pending
     user = update.effective_user
-    if user and user.id == CREATOR_ID:
+
+    if not await can_access_dm_panel(context.bot, chat_id, user.id):
+        return False
+
+    context.user_data["waiting_cmdalias"] = None
+    prompt_chat_id = context.user_data.pop("cmdalias_prompt_chat_id", None)
+    prompt_message_id = context.user_data.pop("cmdalias_prompt_message_id", None)
+
+    new_word = (update.effective_message.text or "").strip()
+
+    try:
+        await update.effective_message.delete()
+    except Exception:
+        pass
+
+    if new_word == "/cancel":
+        confirm = "❌ لغو شد."
+    elif not new_word:
+        confirm = "❗️ چیزی دریافت نشد، تغییری اعمال نشد."
+    else:
+        set_command_alias(chat_id, key, new_word)
+        confirm = f"✔ کلمه‌ی «{DEFAULT_COMMANDS[key]}» به «{new_word}» تغییر کرد."
+
+    text = _shortcuts_panel_text(chat_id, extra_line=confirm)
+    kb = _shortcuts_panel_keyboard(chat_id)
+
+    if prompt_chat_id and prompt_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=prompt_chat_id, message_id=prompt_message_id,
+                text=text, reply_markup=kb
+            )
+            return True
+        except Exception:
+            pass
+    await update.effective_message.reply_text(text, reply_markup=kb)
+    return True
+
+
+async def reset_command_alias_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    _, chat_id, idx = query.data.split(":")
+    chat_id, idx = int(chat_id), int(idx)
+    user = update.effective_user
+
+    if not await can_access_dm_panel(context.bot, chat_id, user.id):
+        await query.answer("⛔️ اجازه ندارید.", show_alert=True)
         return
-    
-    chat = update.effective_chat
-    if chat and chat.type == "private":
-        try:
-            await update.effective_message.reply_text(db.get_shutdown_message())
-        except Exception:
-            pass
-    
-    raise ApplicationHandlerStop
+
+    if 0 <= idx < len(COMMAND_KEYS_ORDER):
+        reset_command_alias(chat_id, COMMAND_KEYS_ORDER[idx])
+
+    await query.answer("✔ به پیش‌فرض برگشت")
+    await query.edit_message_text(_shortcuts_panel_text(chat_id), reply_markup=_shortcuts_panel_keyboard(chat_id))
 
 
-def main():
-    if not BOT_TOKEN or BOT_TOKEN == "PUT_YOUR_BOT_TOKEN_HERE":
-        raise SystemExit("✘ لطفاً اول BOT_TOKEN رو در config.py یا متغیر محیطی ست کنید.")
-    if not CREATOR_ID:
-        logger.warning("⚠️ CREATOR_ID تنظیم نشده — پنل ویژه سازنده کار نخواهد کرد.")
+async def reset_all_command_aliases_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    chat_id = int(query.data.split(":")[1])
+    user = update.effective_user
 
-    db.init_db()
-    app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+    if not await can_access_dm_panel(context.bot, chat_id, user.id):
+        await query.answer("⛔️ اجازه ندارید.", show_alert=True)
+        return
 
-    async def guarded_group_text(update, context):
-        if not db.is_global_active() and update.effective_user.id != CREATOR_ID:
-            return
-        await on_group_text(update, context)
-
-    async def guarded_private_text(update, context):
-        chat = update.effective_chat
-        user = update.effective_user
-        
-        if not db.is_global_active() and user.id != CREATOR_ID:
-            if chat.type == "private":
-                await update.effective_message.reply_text(db.get_shutdown_message())
-            return
-        
-        consumed = await receive_shutdown_text(update, context)
-        if consumed:
-            return
-        consumed = await receive_update_msg(update, context)
-        if consumed:
-            return
-        consumed = await receive_welcome_text(update, context)
-        if consumed:
-            return
-        consumed = await receive_warn_text(update, context)
-        if consumed:
-            return
-        consumed = await receive_bad_word_text(update, context)
-        if consumed:
-            return
-        consumed = await receive_translate_trigger(update, context)
-        if consumed:
-            return
-        consumed = await receive_ai_trigger(update, context)
-        if consumed:
-            return
-        consumed = await receive_command_alias(update, context)
-        if consumed:
-            return
-        consumed = await receive_support_message(update, context)
-        if consumed:
-            return
-        consumed = await send_support_reply(update, context)
-        if consumed:
-            return
-        
-        text = (update.effective_message.text or "").strip()
-        if text in PRICE_LOOKUP_NAMES:
-            await cmd_crypto_single(update, context)
-            return
-        elif text == "رمز ارز":
-            await cmd_crypto_all(update, context)
-            return
-
-        # فقط اگه کاربر صراحتاً یه مدل هوش مصنوعی رو انتخاب کرده باشه، پیامش به AI می‌ره
-        if context.user_data.get("ai_chat_enabled"):
-            await ai_private_chat(update, context)
-            return
-
-        # هیچ‌کدوم از قابلیت‌های ربات مرتبط نبود -> پیام رو سریع پاک کن
-        try:
-            await update.effective_message.delete()
-        except Exception:
-            pass
-
-    # ===== گیت خاموشی =====
-    app.add_handler(TypeHandler(Update, global_shutdown_gate), group=-1)
-    app.add_handler(CallbackQueryHandler(track_nav_state), group=-1)
-
-    # ===== هوش مصنوعی =====
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
-        ai_handler
-    ), group=0)
-
-    # ===== دستورات =====
-    app.add_handler(CommandHandler("start", cmd_start))
-
-    # ===== پی‌وی =====
-    # دکمه‌ی ثابت «صفحه قبل» باید قبل از هندلر عمومی متن پی‌وی چک بشه، وگرنه
-    # به‌جای برگشتن یه قدم، به هوش مصنوعی فرستاده می‌شه
-    app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & filters.Regex("^◀️ صفحه قبل$"), handle_back_step
-    ))
-    app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, guarded_private_text
-    ))
-
-    async def private_media_router(update, context):
-        consumed = await receive_welcome_media(update, context)
-        if consumed:
-            return
-        consumed = await receive_warn_media(update, context)
-        if consumed:
-            return
-        consumed = await receive_support_message(update, context)
-        if consumed:
-            return
-        # هیچ حالت "منتظر مدیا"ای فعال نبود -> پیام رو سریع پاک کن
-        try:
-            await update.effective_message.delete()
-        except Exception:
-            pass
-
-    app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & (filters.Sticker.ALL | filters.ANIMATION | filters.PHOTO),
-        private_media_router
-    ))
-
-    # ===== پیام‌های گروه =====
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, guarded_group_text
-    ), group=2)
-
-    # ===== تگ =====
-    # نکته مهم: این دو handler عمداً تو گروه‌های شماره‌ی جداگانه (6 و 7) ثبت شدن،
-    # نه گروه 0 (جایی که ai_handler هست). چون تو python-telegram-bot، وقتی چند
-    # handler تو یه گروه شماره‌ای باشن، فقط اولی که مچ بشه اجرا می‌شه و بقیه‌ی
-    # همون گروه اصلاً چک نمی‌شن. قبلاً چون تگ تو همون گروه 0 بود، ai_handler
-    # (که زودتر ثبت شده و روی همه‌ی پیام‌های متنی گروه مچ می‌شه) جلوی اجرای
-    # تگ رو می‌گرفت. با گروه شماره‌ی مجزا، این دو مستقل از بقیه همیشه چک می‌شن.
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, track_seen_user
-    ), group=6)
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, tag_all_members
-    ), group=7)
-    app.add_handler(CallbackQueryHandler(tag_close, pattern="^tag_close:"))
-
-    # ===== چک لیست سیاه =====
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & (filters.ANIMATION | filters.Sticker.ALL),
-        check_blacklisted_media
-    ))
-
-    # ===== چک ارسال مدیا =====
-    app.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & (
-            filters.PHOTO | filters.VIDEO | filters.Document.ALL |
-            filters.ANIMATION | filters.Sticker.ALL
-        ),
-        check_media_permissions
-    ), group=3)
-
-    # ===== عضویت در گروه =====
-    app.add_handler(ChatMemberHandler(on_bot_added_to_group, ChatMemberHandler.MY_CHAT_MEMBER))
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_chat_members))
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member_welcome), group=4)
-
-    # ===== دکمه‌های شیشه‌ای =====
-    app.add_handler(CallbackQueryHandler(on_help_button, pattern="^help_commands$"))
-    app.add_handler(CallbackQueryHandler(on_start_menu_button, pattern="^start_menu$"))
-    app.add_handler(CallbackQueryHandler(show_my_groups, pattern="^panel_my_groups$"))
-    app.add_handler(CallbackQueryHandler(open_group_panel, pattern=r"^grp_open:"))
-    app.add_handler(CallbackQueryHandler(toggle_lock, pattern=r"^grp_(lock|unlock):"))
-    app.add_handler(CallbackQueryHandler(toggle_active, pattern=r"^grp_active_(on|off):"))
-    app.add_handler(CallbackQueryHandler(show_banned_list, pattern=r"^grp_banned:"))
-    app.add_handler(CallbackQueryHandler(show_muted_list, pattern=r"^grp_muted:"))
-    app.add_handler(CallbackQueryHandler(show_mute_detail, pattern=r"^mute_user:"))
-    app.add_handler(CallbackQueryHandler(release_mute_from_panel, pattern=r"^mute_release:"))
-    app.add_handler(CallbackQueryHandler(ask_edit_mute_duration, pattern=r"^mute_edit:"))
-    app.add_handler(CallbackQueryHandler(set_mute_duration_from_panel, pattern=r"^mute_setdur:"))
-    app.add_handler(CallbackQueryHandler(show_features_panel, pattern=r"^grp_features:"))
-    app.add_handler(CallbackQueryHandler(toggle_feature, pattern=r"^feat_toggle:"))
-    app.add_handler(CallbackQueryHandler(open_welcome_panel, pattern=r"^wc_panel:"))
-    app.add_handler(CallbackQueryHandler(toggle_welcome, pattern=r"^wc_(on|off):"))
-    app.add_handler(CallbackQueryHandler(ask_edit_welcome, pattern=r"^wc_edit:"))
-    app.add_handler(CallbackQueryHandler(preview_welcome, pattern=r"^wc_preview:"))
-    app.add_handler(CallbackQueryHandler(reset_welcome, pattern=r"^wc_reset:"))
-    app.add_handler(CallbackQueryHandler(show_reports_list, pattern=r"^grp_reports:"))
-    app.add_handler(CallbackQueryHandler(clear_reports_cb, pattern=r"^reports_clear:"))
-    app.add_handler(CallbackQueryHandler(open_report_detail, pattern=r"^report_open:"))
-    app.add_handler(CallbackQueryHandler(handle_report_action, pattern=r"^report_act:"))
-    app.add_handler(CallbackQueryHandler(open_warnedit_panel, pattern=r"^warnedit_panel:"))
-    app.add_handler(CallbackQueryHandler(open_level_panel, pattern=r"^warnedit_lvl:"))
-    app.add_handler(CallbackQueryHandler(ask_warn_text, pattern=r"^warnedit_text:"))
-    app.add_handler(CallbackQueryHandler(ask_warn_media, pattern=r"^warnedit_media:"))
-    app.add_handler(CallbackQueryHandler(reset_warn, pattern=r"^warnedit_reset:"))
-    app.add_handler(CallbackQueryHandler(open_translate_panel, pattern=r"^tr_panel:"))
-    app.add_handler(CallbackQueryHandler(set_translate_lang_cb, pattern=r"^tr_set:"))
-    app.add_handler(CallbackQueryHandler(ask_set_translate_trigger, pattern=r"^tr_trigger:"))
-    app.add_handler(CallbackQueryHandler(open_ai_trigger_panel, pattern=r"^ai_trigger_panel:"))
-    app.add_handler(CallbackQueryHandler(ask_set_ai_trigger, pattern=r"^ai_trigger_set:"))
-    app.add_handler(CallbackQueryHandler(open_shortcuts_panel, pattern=r"^cmdshortcuts_panel:"))
-    app.add_handler(CallbackQueryHandler(ask_edit_command_alias, pattern=r"^cmdalias_edit:"))
-    app.add_handler(CallbackQueryHandler(reset_command_alias_cb, pattern=r"^cmdalias_reset:"))
-    app.add_handler(CallbackQueryHandler(reset_all_command_aliases_cb, pattern=r"^cmdalias_resetall:"))
-    
-    # ===== پاک‌سازی خودکار =====
-    app.add_handler(CallbackQueryHandler(open_cleanup_panel, pattern=r"^cln_panel:"))
-    app.add_handler(CallbackQueryHandler(toggle_cleanup, pattern=r"^cln_toggle:"))
-    app.add_handler(CallbackQueryHandler(ask_interval, pattern=r"^cln_interval:"))
-    app.add_handler(CallbackQueryHandler(adjust_interval, pattern=r"^cln_adjust:"))
-    app.add_handler(CallbackQueryHandler(set_cleanup_count, pattern=r"^cln_count:"))
-    app.add_handler(CallbackQueryHandler(adjust_count, pattern=r"^cln_count_adjust:"))
-    app.add_handler(CallbackQueryHandler(run_cleanup_now, pattern=r"^cln_run:"))
-    
-    app.add_handler(CallbackQueryHandler(open_image_lang_panel, pattern=r"^imglang_panel:"))
-    app.add_handler(CallbackQueryHandler(set_image_lang_cb, pattern=r"^imglang_set:"))
-    app.add_handler(CallbackQueryHandler(ask_add_welcome_media, pattern=r"^wc_media:"))
-    app.add_handler(CallbackQueryHandler(clear_welcome_media_cb, pattern=r"^wc_media_clear:"))
-    app.add_handler(CallbackQueryHandler(show_warned_list, pattern=r"^grp_warned:"))
-    app.add_handler(CallbackQueryHandler(open_bad_words_panel, pattern=r"^badwords_panel:"))
-    app.add_handler(CallbackQueryHandler(ask_add_bad_word, pattern=r"^badwords_add:"))
-    app.add_handler(CallbackQueryHandler(delete_bad_word_cb, pattern=r"^badwords_del:"))
-    app.add_handler(CallbackQueryHandler(open_creator_panel, pattern="^creator_panel_open$"))
-    app.add_handler(CallbackQueryHandler(toggle_global, pattern="^creator_global_(on|off)$"))
-    app.add_handler(CallbackQueryHandler(ask_set_shutdown_text, pattern="^creator_set_msg$"))
-    
-    # ===== پنل سازنده (بخش آپدیت) =====
-    app.add_handler(CallbackQueryHandler(ask_set_update_msg, pattern="^creator_set_update_msg$"))
-    app.add_handler(CallbackQueryHandler(show_update_msg, pattern="^creator_show_update_msg$"))
-    
-    # ===== انتخاب مدل هوش مصنوعی =====
-    app.add_handler(CallbackQueryHandler(ai_model_select, pattern="^ai_model_select$"))
-    app.add_handler(CallbackQueryHandler(ai_use_gemini, pattern="^ai_use_gemini$"))
-    app.add_handler(CallbackQueryHandler(ai_use_chatgpt, pattern="^ai_use_chatgpt$"))
-    
-    # ===== دکمه ری‌استارت =====
-    app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
-
-    # ===== پشتیبانی =====
-    app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
-    app.add_handler(CallbackQueryHandler(confirm_support, pattern="^support_confirm:"))
-    app.add_handler(CallbackQueryHandler(cancel_support, pattern="^support_cancel$"))
-    app.add_handler(CallbackQueryHandler(support_admin_panel, pattern="^support_admin$"))
-    app.add_handler(CallbackQueryHandler(show_support_message, pattern="^support_show:"))
-    app.add_handler(CallbackQueryHandler(support_reply, pattern="^support_reply:"))
-    app.add_handler(CallbackQueryHandler(support_delete, pattern="^support_delete:"))
-    # نکته: دریافت پیام پشتیبانی و پاسخ ادمین دیگه اینجا رجیستر نمی‌شن، چون تو
-    # guarded_private_text و private_media_router (بالاتر) با اولویت درست
-    # چک می‌شن - قبلاً اینجا بودن ولی چون بعد از هندلر عمومی متن پی‌وی ثبت
-    # شده بودن، اصلاً هیچ‌وقت اجرا نمی‌شدن.
-
-    # ===== Jobها =====
-    app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
-    app.job_queue.run_repeating(run_auto_cleanup_job, interval=3600, first=300)
-
-    # ===== ثبت آخرین آیدی پیام =====
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.ALL, track_last_message), group=5)
-
-    logger.info("🤖 ربات در حال اجراست...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
-if __name__ == "__main__":
-    main()
+    reset_all_command_aliases(chat_id)
+    await query.answer("✔ همه به پیش‌فرض برگشتن")
+    await query.edit_message_text(_shortcuts_panel_text(chat_id), reply_markup=_shortcuts_panel_keyboard(chat_id))
