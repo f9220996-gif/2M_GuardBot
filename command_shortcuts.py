@@ -15,24 +15,44 @@ from permissions import can_access_dm_panel
 
 # کلید پیش‌فرض -> برچسب فارسی نمایشی (فقط برای نمایش تو پنل)
 DEFAULT_COMMANDS = {
-    "خاموشی": "قفل کردن گروه",
+    "خاموشی": "قفل گروه",
     "روشن": "باز کردن گروه",
     "سکوت": "سکوت دادن",
-    "آزاد کن": "برداشتن سکوت",
+    "آزاد کن": "آزاد کردن",
     "بن کن": "بن کردن",
-    "اخطار": "اخطار دادن",
+    "اخطار": "اخطار",
     "پاک": "پاک کردن پیام",
     "گیف بن": "بن کردن گیف",
     "استیکر بن": "بن کردن استیکر",
     "تاس": "بازی تاس",
-    "شیر_یا_خط": "بازی شیر یا خط",
-    "سنگ_کاغذ_قیچی": "بازی سنگ‌کاغذقیچی",
-    "حدس_عدد": "بازی حدس عدد",
+    "شیر_یا_خط": "شیر یا خط",
+    "سنگ_کاغذ_قیچی": "سنگ‌کاغذقیچی",
+    "حدس_عدد": "حدس عدد",
     "حدس": "حدس زدن",
     "گزارش": "گزارش کاربر",
-    "ترجمه": "ترجمه با ریپلای",
-    "تاریخ": "دستور تاریخ",
-    "رمز ارز": "جدول قیمت‌ها",
+    "ترجمه": "ترجمه",
+    "تاریخ": "تاریخ",
+    "رمز ارز": "قیمت‌ها",
+}
+COMMAND_ICONS = {
+    "خاموشی": "🔒",
+    "روشن": "🔓",
+    "سکوت": "🔇",
+    "آزاد کن": "🔊",
+    "بن کن": "⛔️",
+    "اخطار": "⚠️",
+    "پاک": "🗑",
+    "گیف بن": "🚫",
+    "استیکر بن": "🚫",
+    "تاس": "🎲",
+    "شیر_یا_خط": "🪙",
+    "سنگ_کاغذ_قیچی": "✊",
+    "حدس_عدد": "🔢",
+    "حدس": "❓",
+    "گزارش": "📩",
+    "ترجمه": "🌐",
+    "تاریخ": "📅",
+    "رمز ارز": "💰",
 }
 COMMAND_KEYS_ORDER = list(DEFAULT_COMMANDS.keys())
 
@@ -86,9 +106,14 @@ def get_group_command_keywords(chat_id):
 # ---------------------------------------------------------------------------
 
 def _shortcuts_panel_text(chat_id, extra_line=None):
+    legend = "\n".join(
+        f"{COMMAND_ICONS.get(key, '•')} {DEFAULT_COMMANDS[key]}"
+        for key in COMMAND_KEYS_ORDER
+    )
     text = (
         "🔤 میان‌برهای دستورات گروه\n\n"
-        "هرکدوم رو بزن تا کلمه‌ای که برای اون دستور تایپ می‌کنی رو عوض کنی."
+        f"{legend}\n\n"
+        "روی هرکدوم از دکمه‌های زیر بزن تا کلمه‌ی همون دستور رو عوض کنی:"
     )
     if extra_line:
         text = f"{extra_line}\n\n{text}"
@@ -97,10 +122,16 @@ def _shortcuts_panel_text(chat_id, extra_line=None):
 
 def _shortcuts_panel_keyboard(chat_id):
     rows = []
+    line = []
     for i, key in enumerate(COMMAND_KEYS_ORDER):
-        label = DEFAULT_COMMANDS[key]
+        icon = COMMAND_ICONS.get(key, "•")
         active = get_active_keyword(chat_id, key)
-        rows.append([InlineKeyboardButton(f"{label}: «{active}»", callback_data=f"cmdalias_edit:{chat_id}:{i}")])
+        line.append(InlineKeyboardButton(f"{icon} «{active}»", callback_data=f"cmdalias_edit:{chat_id}:{i}"))
+        if len(line) == 2:
+            rows.append(line)
+            line = []
+    if line:
+        rows.append(line)
     rows.append([InlineKeyboardButton("🔄 بازنشانی همه به پیش‌فرض", callback_data=f"cmdalias_resetall:{chat_id}")])
     rows.append([InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")])
     return InlineKeyboardMarkup(rows)
