@@ -132,6 +132,7 @@ def _shortcuts_panel_keyboard(chat_id):
             line = []
     if line:
         rows.append(line)
+    rows.append([InlineKeyboardButton("🧠 فعال‌ساز هوش مصنوعی", callback_data=f"ai_trigger_panel:{chat_id}")])
     rows.append([InlineKeyboardButton("🔄 بازنشانی همه به پیش‌فرض", callback_data=f"cmdalias_resetall:{chat_id}")])
     rows.append([InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")])
     return InlineKeyboardMarkup(rows)
