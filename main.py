@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 """
 فایل اصلی اجرای ربات مدیریت گروه.
@@ -27,7 +28,7 @@ from moderation import (
 from bad_words_filter import check_message_for_bad_words
 from games import (
     cmd_tas, cmd_shir_khat, cmd_sang_kaghaz_gheychi,
-    rps_join, rps_pick
+    rps_pick
 )
 from panel import (
     show_my_groups, open_group_panel, toggle_lock, toggle_active,
@@ -432,7 +433,6 @@ def main():
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, tag_all_members
     ), group=7)
     app.add_handler(CallbackQueryHandler(tag_close, pattern="^tag_close:"))
-    app.add_handler(CallbackQueryHandler(rps_join, pattern="^rps_join$"))
     app.add_handler(CallbackQueryHandler(rps_pick, pattern="^rps_pick:"))
 
     # ===== چک لیست سیاه =====
