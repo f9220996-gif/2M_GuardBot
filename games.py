@@ -20,11 +20,11 @@ async def cmd_shir_khat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------------------
-# سنگ‌کاغذقیچی: دو نفره، ۳ راند، با دکمه‌های شیشه‌ای
+# سنگ‌کاغذقیچی: یک راند.
+# ریپلای روی پیام کسی = چالش مستقیم با همون شخص. بدون ریپلای = بازی با ربات.
 # ---------------------------------------------------------------------------
 
 CHOICES = {"سنگ": "🪨", "کاغذ": "📄", "قیچی": "✂️"}
-TOTAL_ROUNDS = 1
 
 
 def _beats(a, b):
@@ -43,66 +43,54 @@ def _rps_keyboard():
     ]])
 
 
-def _round_text(game, extra=""):
-    text = (
-        f"✂️📄🪨 راند {game['round']}/{TOTAL_ROUNDS}\n\n"
-        f"{game['player1_name']} 🆚 {game['player2_name']}\n"
-        f"امتیاز: {game['score1']} - {game['score2']}\n\n"
-        "هرکس دکمه‌ی انتخابش رو بزنه (فقط این دو نفر می‌تونن انتخاب کنن):"
-    )
-    if extra:
-        text = f"{extra}\n\n{text}"
-    return text
-
-
 async def cmd_sang_kaghaz_gheychi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """شروع یه چالش سنگ‌کاغذقیچی دو نفره، ۳ راند"""
+    """
+    اگه ریپلای روی پیام یه نفر باشه، مستقیم باهاش چالش شروع می‌شه.
+    اگه بدون ریپلای باشه، بازی با خودِ ربات شروع می‌شه.
+    """
     message = update.effective_message
     user = update.effective_user
 
     existing = context.chat_data.get("rps_game")
-    if existing and existing.get("status") in ("waiting", "playing"):
+    if existing and existing.get("status") == "playing":
         await message.reply_text("⚠️ یه بازی سنگ‌کاغذقیچی از قبل تو این گروه در حال اجراست.")
         return
 
+    reply_target = message.reply_to_message.from_user if message.reply_to_message else None
+
+    if reply_target and not reply_target.is_bot:
+        if reply_target.id == user.id:
+            await message.reply_text("نمی‌تونی با خودت بازی کنی! 😄")
+            return
+
+        context.chat_data["rps_game"] = {
+            "mode": "vs_player",
+            "player1_id": user.id,
+            "player1_name": user.full_name,
+            "player2_id": reply_target.id,
+            "player2_name": reply_target.full_name,
+            "choices": {},
+            "status": "playing",
+        }
+        await message.reply_text(
+            f"✂️📄🪨 {user.full_name} با {reply_target.full_name} به چالش سنگ‌کاغذقیچی افتاد!\n\n"
+            "هردو نفر دکمه‌ی انتخابشون رو بزنن:",
+            reply_markup=_rps_keyboard()
+        )
+        return
+
+    # بدون ریپلای -> بازی با ربات
     context.chat_data["rps_game"] = {
+        "mode": "vs_bot",
         "player1_id": user.id,
         "player1_name": user.full_name,
-        "player2_id": None,
-        "player2_name": None,
-        "round": 1,
-        "score1": 0,
-        "score2": 0,
         "choices": {},
-        "status": "waiting",
+        "status": "playing",
     }
-
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎮 قبول چالش", callback_data="rps_join")]])
     await message.reply_text(
-        f"✂️📄🪨 {user.full_name} یه بازی سنگ‌کاغذقیچی (۳ راند) شروع کرد!\n\n"
-        "کی می‌خواد باهاش بازی کنه؟",
-        reply_markup=kb
+        f"✂️📄🪨 {user.full_name}، با من بازی کن! انتخابتو بزن:",
+        reply_markup=_rps_keyboard()
     )
-
-
-async def rps_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    game = context.chat_data.get("rps_game")
-    user = update.effective_user
-
-    if not game or game.get("status") != "waiting":
-        await query.answer("این چالش دیگه فعال نیست.", show_alert=True)
-        return
-    if user.id == game["player1_id"]:
-        await query.answer("نمی‌تونی با خودت بازی کنی! 😄", show_alert=True)
-        return
-
-    game["player2_id"] = user.id
-    game["player2_name"] = user.full_name
-    game["status"] = "playing"
-    await query.answer("وارد بازی شدی! 🎮")
-
-    await query.edit_message_text(_round_text(game), reply_markup=_rps_keyboard())
 
 
 async def rps_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,6 +103,32 @@ async def rps_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("این بازی دیگه فعال نیست.", show_alert=True)
         return
 
+    # ===== حالت بازی با ربات =====
+    if game["mode"] == "vs_bot":
+        if user.id != game["player1_id"]:
+            await query.answer("⛔️ این بازی مال تو نیست.", show_alert=True)
+            return
+
+        bot_choice = random.choice(list(CHOICES.keys()))
+        await query.answer()
+
+        if choice == bot_choice:
+            result_line = f"مساوی شدیم! هر دو {CHOICES[choice]} انتخاب کردیم. 🤝"
+        elif _beats(choice, bot_choice):
+            result_line = f"🎉 بردی! ({CHOICES[choice]} در برابر {CHOICES[bot_choice]})"
+        else:
+            result_line = f"😅 باختی! ({CHOICES[bot_choice]} در برابر {CHOICES[choice]})"
+
+        await query.edit_message_text(
+            f"✂️📄🪨 نتیجه\n\n"
+            f"{game['player1_name']}: {CHOICES[choice]}\n"
+            f"من: {CHOICES[bot_choice]}\n\n"
+            f"{result_line}"
+        )
+        context.chat_data["rps_game"] = None
+        return
+
+    # ===== حالت دو نفره =====
     if user.id not in (game["player1_id"], game["player2_id"]):
         await query.answer("⛔️ تو تو این بازی نیستی.", show_alert=True)
         return
@@ -127,39 +141,34 @@ async def rps_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("✅ انتخابت ثبت شد.")
 
     if len(game["choices"]) < 2:
-        return  # هنوز نفر دوم انتخاب نکرده
+        other_name = (
+            game["player2_name"] if user.id == game["player1_id"] else game["player1_name"]
+        )
+        try:
+            await query.edit_message_text(
+                f"✂️📄🪨 {game['player1_name']} 🆚 {game['player2_name']}\n\n"
+                f"✅ یک نفر انتخابش رو کرد.\n"
+                f"⏳ منتظر جواب {other_name}...",
+                reply_markup=_rps_keyboard()
+            )
+        except Exception:
+            pass
+        return
 
     c1 = game["choices"][game["player1_id"]]
     c2 = game["choices"][game["player2_id"]]
 
     if c1 == c2:
-        result_line = f"این راند مساوی شد! هر دو {CHOICES[c1]} انتخاب کردن."
+        result_line = f"مساوی شد! هر دو {CHOICES[c1]} انتخاب کردن. 🤝"
     elif _beats(c1, c2):
-        game["score1"] += 1
-        result_line = f"🎉 {game['player1_name']} این راند رو برد! ({CHOICES[c1]} در برابر {CHOICES[c2]})"
+        result_line = f"🏆 {game['player1_name']} برد! ({CHOICES[c1]} در برابر {CHOICES[c2]})"
     else:
-        game["score2"] += 1
-        result_line = f"🎉 {game['player2_name']} این راند رو برد! ({CHOICES[c2]} در برابر {CHOICES[c1]})"
+        result_line = f"🏆 {game['player2_name']} برد! ({CHOICES[c2]} در برابر {CHOICES[c1]})"
 
-    game["choices"] = {}
-
-    if game["round"] >= TOTAL_ROUNDS:
-        game["status"] = "finished"
-        if game["score1"] > game["score2"]:
-            winner_line = f"🏆 برنده‌ی نهایی: {game['player1_name']}!"
-        elif game["score2"] > game["score1"]:
-            winner_line = f"🏆 برنده‌ی نهایی: {game['player2_name']}!"
-        else:
-            winner_line = "🤝 بازی مساوی تموم شد!"
-
-        await query.edit_message_text(
-            f"{result_line}\n\n"
-            f"✂️📄🪨 نتیجه‌ی نهایی (۳ راند)\n"
-            f"{game['player1_name']} {game['score1']} - {game['score2']} {game['player2_name']}\n\n"
-            f"{winner_line}"
-        )
-        context.chat_data["rps_game"] = None
-        return
-
-    game["round"] += 1
-    await query.edit_message_text(_round_text(game, extra=result_line), reply_markup=_rps_keyboard())
+    await query.edit_message_text(
+        f"✂️📄🪨 نتیجه\n\n"
+        f"{game['player1_name']}: {CHOICES[c1]}\n"
+        f"{game['player2_name']}: {CHOICES[c2]}\n\n"
+        f"{result_line}"
+    )
+    context.chat_data["rps_game"] = None
