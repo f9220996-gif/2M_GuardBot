@@ -86,7 +86,7 @@ def _group_panel_keyboard(chat_id, group):
             InlineKeyboardButton("⚠️ اخطارها", callback_data=f"grp_warned:{chat_id}"),
         ],
         [
-            InlineKeyboardButton("🧩 قابلیت‌ها", callback_data=f"grp_features:{chat_id}"),
+            InlineKeyboardButton("🧩 تغییر قابلیت‌ها", callback_data=f"grp_features:{chat_id}"),
             InlineKeyboardButton("👋 خوش‌آمدگویی", callback_data=f"wc_panel:{chat_id}"),
         ],
         [
@@ -433,7 +433,8 @@ def _build_features_keyboard(chat_id):
     def btn(key):
         enabled = db.is_feature_enabled(chat_id, key)
         icon = "✔" if enabled else "✘"
-        return InlineKeyboardButton(f"{icon} {db.TOGGLEABLE_FEATURES[key]}", callback_data=f"feat_toggle:{chat_id}:{key}")
+        label = db.TOGGLEABLE_FEATURES.get(key, key)
+        return InlineKeyboardButton(f"{icon} {label}", callback_data=f"feat_toggle:{chat_id}:{key}")
 
     rows_kb = [
         [btn("bad_words"), btn("games")],
