@@ -1,10 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-دستور «رمز ارز»: قیمت لحظه‌ای رمزارزها از API نوبیتکس، به‌صورت عکس.
+دستور «رمز ارز»: قیمت لحظه‌ای رمزارزها، به‌صورت عکس.
 هر عضو می‌تونه اسم یه رمزارز، دلار یا طلا رو تنها بنویسه تا فقط قیمت همون یکی رو ببینه.
 
-نکته: نوبیتکس یک صرافی رمزارز است و قیمت طلا/دلار را پوشش نمی‌دهد،
-برای همین این دو مورد از یک منبع عمومی دیگر (tgju) گرفته می‌شوند.
+نکته‌ی مهم درباره‌ی منبع داده:
+قبلاً قیمت رمزارزها از API نوبیتکس گرفته می‌شد، ولی چون نوبیتکس اخیراً هدف
+تحریم‌های مستقیم آمریکا قرار گرفته، سرورهای میزبانی خارج از ایران (مثل
+Railway) دیگه نمی‌تونن بهش وصل بشن (خطای DNS/اتصال). برای همین قیمت
+رمزارزها الان از CoinGecko (یه API بین‌المللی، رایگان، بدون محدودیت
+جغرافیایی) به دلار گرفته می‌شه، و با نرخ دلار/تومنِ لحظه‌ای (از tgju) به
+تومان تبدیل می‌شه. دلار و طلا هنوز مستقیماً از tgju میان (چون رمزارزی
+نیستن و CoinGecko نرخ تومنی نداره).
+
+اگه یه روز tgju هم از دسترس خارج از ایران خارج بشه، باید یه منبع نرخ دلار
+دیگه (مثل bonbast یا alanchand) جایگزینش بشه - این تابع‌ها جدا نوشته شدن
+تا جایگزین کردنشون ساده باشه.
 """
 
 import io
@@ -18,16 +28,16 @@ from telegram.ext import ContextTypes
 import arabic_reshaper
 from bidi.algorithm import get_display
 
-NOBITEX_STATS_URL = "https://api.nobitex.ir/market/stats"
+COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
 TGJU_URL = "https://call4.tgju.org/ajax.json"
 
-# دلار و طلا از نوبیتکس در دسترس نیستن (نوبیتکس فقط رمزارزه)، برای همین از منبع دیگه‌ای می‌گیریم
+# دلار و طلا رمزارز نیستن، برای همین از یه منبع عمومی دیگه (tgju) میان
 FIAT_GOLD_MAP = {
     "دلار": ("price_dollar_rl", "💵", "dollar"),
     "طلا": ("geram18", "🥇", "gold"),
 }
 
-# اسم فارسی -> (کد نماد در نوبیتکس, ایموجی)
+# اسم فارسی -> (نماد کوتاه, ایموجی)
 SYMBOL_MAP = {
     "تتر": ("usdt", "💵"),
     "بیت کوین": ("btc", "🟠"),
@@ -49,6 +59,29 @@ SYMBOL_MAP = {
     "کازماس": ("atom", "⚛️"),
     "لایت کوین": ("ltc", "⚪️"),
     "بیت کوین کش": ("bch", "🟢"),
+}
+
+# نماد کوتاه -> آیدیِ همون کوین تو CoinGecko
+COINGECKO_IDS = {
+    "usdt": "tether",
+    "btc": "bitcoin",
+    "eth": "ethereum",
+    "doge": "dogecoin",
+    "ton": "the-open-network",
+    "xrp": "ripple",
+    "ada": "cardano",
+    "sol": "solana",
+    "bnb": "binancecoin",
+    "shib": "shiba-inu",
+    "trx": "tron",
+    "avax": "avalanche-2",
+    "dot": "polkadot",
+    "matic": "matic-network",
+    "link": "chainlink",
+    "uni": "uniswap",
+    "atom": "cosmos",
+    "ltc": "litecoin",
+    "bch": "bitcoin-cash",
 }
 
 # ترجمه اسم هر ارز به زبان‌های دیگه (برای نمایش داخل عکس)
@@ -80,17 +113,17 @@ UI_STRINGS = {
     "fa": {
         "greeting": "سلام جوان ایرانی", "price_label": "قیمت لحظه‌ای", "currency": "تومان",
         "change_suffix": "تغییر نسبت به دیروز", "updated": "بروزرسانی", "unknown": "نامشخص",
-        "grid_title": "نرخ لحظه‌ای رمزارزها", "grid_subtitle": "قدرت‌گرفته از نوبیتکس",
+        "grid_title": "نرخ لحظه‌ای رمزارزها", "grid_subtitle": "قدرت‌گرفته از CoinGecko",
     },
     "en": {
         "greeting": "Hello Iranian Youth", "price_label": "Live Price", "currency": "Toman",
         "change_suffix": "change vs yesterday", "updated": "Updated", "unknown": "N/A",
-        "grid_title": "Live Crypto Rates", "grid_subtitle": "Powered by Nobitex",
+        "grid_title": "Live Crypto Rates", "grid_subtitle": "Powered by CoinGecko",
     },
     "ar": {
         "greeting": "مرحباً أيها الشاب الإيراني", "price_label": "السعر اللحظي", "currency": "تومان",
         "change_suffix": "التغيير مقارنة بالأمس", "updated": "آخر تحديث", "unknown": "غير معروف",
-        "grid_title": "أسعار العملات الرقمية اللحظية", "grid_subtitle": "مدعوم من نوبيتكس",
+        "grid_title": "أسعار العملات الرقمية اللحظية", "grid_subtitle": "مدعوم من CoinGecko",
     },
 }
 
@@ -125,26 +158,46 @@ def _fa(text: str) -> str:
     return get_display(reshaped)
 
 
-def fetch_all_stats():
-    resp = requests.get(NOBITEX_STATS_URL, timeout=10)
+# ---------------------------------------------------------------------------
+# دریافت داده: CoinGecko برای رمزارزها، tgju برای نرخ دلار/طلا
+# ---------------------------------------------------------------------------
+
+def fetch_coingecko_data():
+    """قیمت دلاریِ همه‌ی رمزارزهای موردنیاز رو یکجا از CoinGecko می‌گیره"""
+    ids = ",".join(sorted(set(COINGECKO_IDS.values())))
+    params = {
+        "ids": ids,
+        "vs_currencies": "usd",
+        "include_24hr_change": "true",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0; +https://core.telegram.org/bots)"
+    }
+    resp = requests.get(COINGECKO_URL, params=params, headers=headers, timeout=15)
     resp.raise_for_status()
-    data = resp.json()
-    return data.get("stats", {})
+    return resp.json()
 
 
-def get_price_toman(stats: dict, symbol: str):
-    """قیمت یک رمزارز به تومان + درصد تغییر امروز رو برمی‌گردونه، یا None اگه پیدا نشد"""
-    for key in (f"{symbol}-rls", f"{symbol}rls"):
-        if key in stats:
-            entry = stats[key]
-            try:
-                price_rial = float(entry.get("latest") or entry.get("mark") or 0)
-                price_toman = int(price_rial / 10)
-                day_change = entry.get("dayChange")
-                return price_toman, day_change
-            except (TypeError, ValueError):
-                return None, None
-    return None, None
+def get_price_toman(cg_data: dict, symbol: str, usd_to_toman):
+    """
+    قیمت یک رمزارز به تومان + درصد تغییر ۲۴ ساعته رو برمی‌گردونه.
+    usd_to_toman: نرخ لحظه‌ایِ هر دلار به تومان (از tgju)
+    """
+    cg_id = COINGECKO_IDS.get(symbol)
+    if not cg_id:
+        return None, None
+    entry = cg_data.get(cg_id)
+    if not entry:
+        return None, None
+    usd_price = entry.get("usd")
+    change = entry.get("usd_24h_change")
+    if usd_price is None or usd_to_toman is None:
+        return None, change
+    try:
+        price_toman = int(float(usd_price) * float(usd_to_toman))
+    except (TypeError, ValueError):
+        return None, change
+    return price_toman, change
 
 
 def fetch_tgju_data():
@@ -171,6 +224,12 @@ def get_fiat_gold_price(tgju_data: dict, key: str):
     except (TypeError, ValueError):
         change = None
     return price_toman, change
+
+
+def get_usd_to_toman_rate(tgju_data: dict):
+    """نرخ لحظه‌ایِ هر دلار به تومان (برای تبدیل قیمت دلاریِ رمزارزها)"""
+    rate, _ = get_fiat_gold_price(tgju_data, "price_dollar_rl")
+    return rate
 
 
 def _card_color(day_change):
@@ -210,7 +269,7 @@ def _coin_color(symbol):
 
 
 def render_grid_image(rows: list, lang: str = "fa") -> Image.Image:
-    """rows: لیستی از (نماد نوبیتکس, قیمت تومان, درصد تغییر)"""
+    """rows: لیستی از (نماد, قیمت تومان, درصد تغییر)"""
     cols = 2
     card_w, card_h = 460, 150
     padding = 20
@@ -478,24 +537,36 @@ async def cmd_crypto_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = db.get_image_lang(chat.id) if chat and chat.type in ("group", "supergroup") else "fa"
 
     try:
-        stats = fetch_all_stats()
+        try:
+            tgju_data = fetch_tgju_data()
+            usd_toman = get_usd_to_toman_rate(tgju_data)
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم نرخ دلار رو بگیرم (لازم برای تبدیل قیمت‌ها به تومان).\n{e}")
+            return
+
+        try:
+            cg_data = fetch_coingecko_data()
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
+            return
+
+        seen_symbols = set()
+        rows = []
+        for name, (symbol, emoji) in SYMBOL_MAP.items():
+            if symbol in seen_symbols:  # از دو تا املای بیت‌کوین فقط یکی تو گرید بیاد
+                continue
+            seen_symbols.add(symbol)
+            price, change = get_price_toman(cg_data, symbol, usd_toman)
+            rows.append((symbol, price, change))
+
+        img = render_grid_image(rows, lang=lang)
+        from persian_date import format_persian_datetime
+        caption = f"{_ui(lang, 'grid_title')} — {_ui(lang, 'updated')}: {format_persian_datetime()}"
+        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
     except Exception as e:
-        await update.effective_message.reply_text(f"❌ نتونستم به نوبیتکس وصل بشم.\n{e}")
-        return
-
-    seen_symbols = set()
-    rows = []
-    for name, (symbol, emoji) in SYMBOL_MAP.items():
-        if symbol in seen_symbols:  # از دو تا املای بیت‌کوین فقط یکی تو گرید بیاد
-            continue
-        seen_symbols.add(symbol)
-        price, change = get_price_toman(stats, symbol)
-        rows.append((symbol, price, change))
-
-    img = render_grid_image(rows, lang=lang)
-    from persian_date import format_persian_datetime
-    caption = f"{_ui(lang, 'grid_title')} — {_ui(lang, 'updated')}: {format_persian_datetime()}"
-    await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+        # اگه هرجای دیگه‌ای (مثلاً موقع ساختن عکس) خطای پیش‌بینی‌نشده‌ای بیفته،
+        # لااقل یه پیام واضح بفرست، نه سکوت کامل
+        await update.effective_message.reply_text(f"❌ خطای غیرمنتظره تو ساختن جدول قیمت‌ها.\n{e}")
 
 
 def _build_caption(symbol, price, change, lang="fa"):
@@ -548,12 +619,22 @@ async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol, emoji = match
 
     try:
-        stats = fetch_all_stats()
-    except Exception as e:
-        await update.effective_message.reply_text(f"❌ نتونستم به نوبیتکس وصل بشم.\n{e}")
-        return
+        try:
+            tgju_data = fetch_tgju_data()
+            usd_toman = get_usd_to_toman_rate(tgju_data)
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم نرخ دلار رو بگیرم (لازم برای تبدیل قیمت به تومان).\n{e}")
+            return
 
-    price, change = get_price_toman(stats, symbol)
-    img = render_single_card(symbol, price, change, lang=lang)
-    caption = _build_caption(symbol, price, change, lang=lang)
-    await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+        try:
+            cg_data = fetch_coingecko_data()
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
+            return
+
+        price, change = get_price_toman(cg_data, symbol, usd_toman)
+        img = render_single_card(symbol, price, change, lang=lang)
+        caption = _build_caption(symbol, price, change, lang=lang)
+        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+    except Exception as e:
+        await update.effective_message.reply_text(f"❌ خطای غیرمنتظره تو ساختن قیمت {text}.\n{e}")
