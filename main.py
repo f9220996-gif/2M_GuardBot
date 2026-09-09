@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 فایل اصلی اجرای ربات مدیریت گروه.
@@ -304,7 +303,14 @@ def main():
         logger.warning("⚠️ CREATOR_ID تنظیم نشده — پنل ویژه سازنده کار نخواهد کرد.")
 
     db.init_db()
-    app: Application = ApplicationBuilder().token(BOT_TOKEN).build()
+    app: Application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .write_timeout(30)
+        .build()
+    )
 
     async def guarded_group_text(update, context):
         if not db.is_global_active() and update.effective_user.id != CREATOR_ID:
