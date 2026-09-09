@@ -230,7 +230,7 @@ def render_grid_image(rows: list, lang: str = "fa") -> Image.Image:
     panel_margin = 50
 
     img = _load_background(width, height)
-    img = _glass_panel(img, panel_margin, panel_margin, width - panel_margin, height - panel_margin)
+    img = _glass_panel(img, panel_margin, panel_margin, width - panel_margin, height - panel_margin, blur=7)
     draw = ImageDraw.Draw(img)
 
     title_font = _get_font(40)
