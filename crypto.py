@@ -44,9 +44,6 @@ SYMBOL_MAP = {
     "بیت‌کوین": ("btc", "🟠"),
     "اتریوم": ("eth", "🔷"),
     "تون": ("ton", "💎"),
-    "ریپل": ("xrp", "🌊"),
-    "آوالانچ": ("avax", "❄️"),
-    "لایت کوین": ("ltc", "⚪️"),
     "بیت کوین کش": ("bch", "🟢"),
 }
 
@@ -56,9 +53,6 @@ COINGECKO_IDS = {
     "btc": "bitcoin",
     "eth": "ethereum",
     "ton": "the-open-network",
-    "xrp": "ripple",
-    "avax": "avalanche-2",
-    "ltc": "litecoin",
     "bch": "bitcoin-cash",
 }
 
@@ -68,9 +62,6 @@ NAME_TRANSLATIONS = {
     "btc": {"fa": "بیت کوین", "en": "Bitcoin", "ar": "بيتكوين"},
     "eth": {"fa": "اتریوم", "en": "Ethereum", "ar": "إيثيريوم"},
     "ton": {"fa": "تون", "en": "Toncoin", "ar": "تون كوين"},
-    "xrp": {"fa": "ریپل", "en": "Ripple", "ar": "ريبل"},
-    "avax": {"fa": "آوالانچ", "en": "Avalanche", "ar": "أفالانش"},
-    "ltc": {"fa": "لایت کوین", "en": "Litecoin", "ar": "لايتكوين"},
     "bch": {"fa": "بیت کوین کش", "en": "Bitcoin Cash", "ar": "بيتكوين كاش"},
     "dollar": {"fa": "دلار", "en": "US Dollar", "ar": "الدولار الأمريكي"},
     "gold": {"fa": "طلا (۱۸ عیار)", "en": "Gold (18k)", "ar": "الذهب (18 قيراط)"},
@@ -213,9 +204,6 @@ COIN_COLORS = {
     "eth": (98, 126, 234),
     "usdt": (38, 161, 123),
     "ton": (0, 152, 234),
-    "xrp": (35, 41, 47),
-    "avax": (232, 65, 66),
-    "ltc": (166, 166, 166),
     "bch": (139, 195, 74),
 }
 
