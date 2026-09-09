@@ -43,20 +43,9 @@ SYMBOL_MAP = {
     "بیت کوین": ("btc", "🟠"),
     "بیت‌کوین": ("btc", "🟠"),
     "اتریوم": ("eth", "🔷"),
-    "دوج": ("doge", "🐶"),
     "تون": ("ton", "💎"),
     "ریپل": ("xrp", "🌊"),
-    "کاردانو": ("ada", "🔵"),
-    "سولانا": ("sol", "🟣"),
-    "بایننس": ("bnb", "🟡"),
-    "شیبا": ("shib", "🐕"),
-    "ترون": ("trx", "🔴"),
     "آوالانچ": ("avax", "❄️"),
-    "پولکادات": ("dot", "⚫️"),
-    "پالیگان": ("matic", "🟪"),
-    "چین لینک": ("link", "🔗"),
-    "یونی": ("uni", "🦄"),
-    "کازماس": ("atom", "⚛️"),
     "لایت کوین": ("ltc", "⚪️"),
     "بیت کوین کش": ("bch", "🟢"),
 }
@@ -66,20 +55,9 @@ COINGECKO_IDS = {
     "usdt": "tether",
     "btc": "bitcoin",
     "eth": "ethereum",
-    "doge": "dogecoin",
     "ton": "the-open-network",
     "xrp": "ripple",
-    "ada": "cardano",
-    "sol": "solana",
-    "bnb": "binancecoin",
-    "shib": "shiba-inu",
-    "trx": "tron",
     "avax": "avalanche-2",
-    "dot": "polkadot",
-    "matic": "matic-network",
-    "link": "chainlink",
-    "uni": "uniswap",
-    "atom": "cosmos",
     "ltc": "litecoin",
     "bch": "bitcoin-cash",
 }
@@ -89,20 +67,9 @@ NAME_TRANSLATIONS = {
     "usdt": {"fa": "تتر", "en": "Tether", "ar": "تيثر"},
     "btc": {"fa": "بیت کوین", "en": "Bitcoin", "ar": "بيتكوين"},
     "eth": {"fa": "اتریوم", "en": "Ethereum", "ar": "إيثيريوم"},
-    "doge": {"fa": "دوج", "en": "Dogecoin", "ar": "دوجكوين"},
     "ton": {"fa": "تون", "en": "Toncoin", "ar": "تون كوين"},
     "xrp": {"fa": "ریپل", "en": "Ripple", "ar": "ريبل"},
-    "ada": {"fa": "کاردانو", "en": "Cardano", "ar": "كاردانو"},
-    "sol": {"fa": "سولانا", "en": "Solana", "ar": "سولانا"},
-    "bnb": {"fa": "بایننس", "en": "Binance Coin", "ar": "بينانس كوين"},
-    "shib": {"fa": "شیبا", "en": "Shiba Inu", "ar": "شيبا إينو"},
-    "trx": {"fa": "ترون", "en": "Tron", "ar": "ترون"},
     "avax": {"fa": "آوالانچ", "en": "Avalanche", "ar": "أفالانش"},
-    "dot": {"fa": "پولکادات", "en": "Polkadot", "ar": "بولكادوت"},
-    "matic": {"fa": "پالیگان", "en": "Polygon", "ar": "بوليجون"},
-    "link": {"fa": "چین لینک", "en": "Chainlink", "ar": "تشين لينك"},
-    "uni": {"fa": "یونی", "en": "Uniswap", "ar": "يوني سواب"},
-    "atom": {"fa": "کازماس", "en": "Cosmos", "ar": "كوزموس"},
     "ltc": {"fa": "لایت کوین", "en": "Litecoin", "ar": "لايتكوين"},
     "bch": {"fa": "بیت کوین کش", "en": "Bitcoin Cash", "ar": "بيتكوين كاش"},
     "dollar": {"fa": "دلار", "en": "US Dollar", "ar": "الدولار الأمريكي"},
@@ -245,20 +212,9 @@ COIN_COLORS = {
     "btc": (247, 147, 26),
     "eth": (98, 126, 234),
     "usdt": (38, 161, 123),
-    "doge": (194, 163, 76),
     "ton": (0, 152, 234),
     "xrp": (35, 41, 47),
-    "ada": (14, 116, 224),
-    "sol": (153, 69, 255),
-    "bnb": (240, 185, 11),
-    "shib": (255, 92, 0),
-    "trx": (235, 12, 12),
     "avax": (232, 65, 66),
-    "dot": (230, 0, 122),
-    "matic": (130, 71, 229),
-    "link": (42, 91, 220),
-    "uni": (255, 0, 122),
-    "atom": (46, 58, 91),
     "ltc": (166, 166, 166),
     "bch": (139, 195, 74),
 }
@@ -269,78 +225,79 @@ def _coin_color(symbol):
 
 
 def render_grid_image(rows: list, lang: str = "fa") -> Image.Image:
-    """rows: لیستی از (نماد, قیمت تومان, درصد تغییر)"""
-    cols = 2
-    card_w, card_h = 460, 150
-    padding = 20
-    n = len(rows)
-    grid_rows = (n + cols - 1) // cols
+    """rows: لیستی از (نماد, قیمت تومان, درصد تغییر) - خروجی همیشه با نسبت ۱۶:۹"""
+    width, height = 1600, 900  # نسبت دقیق 16:9، هماهنگ با کارت‌های تکی
+    panel_margin = 50
 
-    width = cols * card_w + (cols + 1) * padding
-    height = grid_rows * card_h + (grid_rows + 1) * padding + 120
-
-    img = Image.new("RGB", (width, height), (14, 14, 20))
+    img = _load_background(width, height)
+    img = _glass_panel(img, panel_margin, panel_margin, width - panel_margin, height - panel_margin)
     draw = ImageDraw.Draw(img)
 
-    # نوار سرصفحه با گرادیان بنفش ساده
-    for i in range(100):
-        t = i / 100
-        r = int(88 + (147 - 88) * t)
-        g = int(28 + (51 - 28) * t)
-        b = int(150 + (234 - 150) * t)
-        draw.line([(0, i), (width, i)], fill=(r, g, b))
-
-    title_font = _get_font(38)
-    sub_font = _get_font(20)
-    name_font = _get_font(26)
-    price_font = _get_font(30)
-    change_font = _get_font(20)
-    icon_font = _get_font(28)
+    title_font = _get_font(40)
+    sub_font = _get_font(22)
+    name_font = _get_font(24)
+    price_font = _get_font(28)
+    change_font = _get_font(19)
 
     title = _fa(_ui(lang, "grid_title"))
     tw = draw.textlength(title, font=title_font)
-    draw.text(((width - tw) / 2, 22), title, font=title_font, fill=(255, 255, 255))
+    draw.text(((width - tw) / 2, panel_margin + 26), title, font=title_font, fill=(255, 255, 255))
 
     sub = _fa(_ui(lang, "grid_subtitle"))
     sw = draw.textlength(sub, font=sub_font)
-    draw.text(((width - sw) / 2, 70), sub, font=sub_font, fill=(255, 255, 255))
+    draw.text(((width - sw) / 2, panel_margin + 78), sub, font=sub_font, fill=(225, 215, 235))
+
+    # ===== محاسبه‌ی چیدمان گرید تا داخل فریم ۱۶:۹ جا بشه =====
+    n = len(rows)
+    cols = 4 if n > 4 else max(1, n)
+    grid_rows = (n + cols - 1) // cols
+
+    inner_x0 = panel_margin + 34
+    inner_x1 = width - panel_margin - 34
+    grid_top = panel_margin + 130
+    grid_bottom = height - panel_margin - 30
+
+    gap = 22
+    available_w = inner_x1 - inner_x0
+    available_h = grid_bottom - grid_top
+
+    card_w = (available_w - (cols - 1) * gap) / cols
+    card_h = (available_h - (grid_rows - 1) * gap) / grid_rows
 
     for i, (symbol, price, change) in enumerate(rows):
         name = _tr_name(symbol, lang)
         r, c = divmod(i, cols)
-        x = padding + c * (card_w + padding)
-        y = 120 + padding + r * (card_h + padding)
+        x = inner_x0 + c * (card_w + gap)
+        y = grid_top + r * (card_h + gap)
 
         accent = _coin_color(symbol)
         change_color = _card_color(change)
 
-        # پس‌زمینه کارت با یه سایه‌ی ملایم از رنگ خود ارز
-        shade = tuple(int(a * 0.10 + b * 0.90) for a, b in zip(accent, (24, 24, 32)))
-        draw.rounded_rectangle([x, y, x + card_w, y + card_h], radius=22, fill=shade, outline=accent, width=3)
-
-        # آیکون دایره‌ای رنگی با حرف اول نماد
-        icon_r = 28
-        icon_cx, icon_cy = x + card_w - 24 - icon_r, y + card_h / 2
-        draw.ellipse(
-            [icon_cx - icon_r, icon_cy - icon_r, icon_cx + icon_r, icon_cy + icon_r],
-            fill=accent
+        shade = tuple(int(a * 0.14 + b * 0.86) for a, b in zip(accent, (255, 255, 255)))
+        draw.rounded_rectangle(
+            [x, y, x + card_w, y + card_h], radius=18,
+            fill=None, outline=accent, width=2
         )
-        letter = symbol[0].upper()
-        lw = draw.textlength(letter, font=icon_font)
-        draw.text((icon_cx - lw / 2, icon_cy - 16), letter, font=icon_font, fill=(255, 255, 255))
 
+        pad = 18
         name_text = _fa(name)
-        draw.text((x + 24, y + 20), name_text, font=name_font, fill=(255, 255, 255))
+        draw.text((x + pad, y + pad - 4), name_text, font=name_font, fill=(255, 255, 255))
 
         price_text = _fa(f"{price:,} تومان") if price is not None else _fa("نامشخص")
-        draw.text((x + 24, y + 62), price_text, font=price_font, fill=(255, 210, 90))
+        available_width = card_w - pad * 2
+        fitted_font = price_font
+        fitted_size = 28
+        while draw.textlength(price_text, font=fitted_font) > available_width and fitted_size > 14:
+            fitted_size -= 2
+            fitted_font = _get_font(fitted_size)
+        draw.text((x + pad, y + card_h * 0.46), price_text, font=fitted_font, fill=(255, 210, 90))
 
         if change is not None:
             try:
                 change_val = float(change)
                 sign = "+" if change_val >= 0 else ""
                 change_text = f"{sign}{change_val:.2f}%"
-                draw.text((x + 24, y + 108), change_text, font=change_font, fill=change_color)
+                draw.text((x + pad, y + card_h - 32), change_text, font=change_font, fill=change_color)
             except (TypeError, ValueError):
                 pass
 
