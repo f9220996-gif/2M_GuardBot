@@ -1,24 +1,29 @@
 # -*- coding: utf-8 -*-
 """
-دستور «رمز ارز»: قیمت لحظه‌ای رمزارزها، به‌صورت عکس.
-هر عضو می‌تونه اسم یه رمزارز، دلار یا طلا رو تنها بنویسه تا فقط قیمت همون یکی رو ببینه.
+دستور «رمز ارز»: قیمت لحظه‌ای بیت‌کوین/تتر/بیت‌کوین‌کش/دلار/یورو/طلا، به‌صورت عکس.
+هر عضو می‌تونه اسم یکی از این‌ها رو تنها بنویسه تا فقط قیمت همون یکی رو ببینه.
 
 نکته‌ی مهم درباره‌ی منبع داده:
 قبلاً قیمت رمزارزها از API نوبیتکس گرفته می‌شد، ولی چون نوبیتکس اخیراً هدف
 تحریم‌های مستقیم آمریکا قرار گرفته، سرورهای میزبانی خارج از ایران (مثل
-Railway) دیگه نمی‌تونن بهش وصل بشن (خطای DNS/اتصال). برای همین قیمت
-رمزارزها الان از CoinGecko (یه API بین‌المللی، رایگان، بدون محدودیت
-جغرافیایی) به دلار گرفته می‌شه، و با نرخ دلار/تومنِ لحظه‌ای (از tgju) به
-تومان تبدیل می‌شه. دلار و طلا هنوز مستقیماً از tgju میان (چون رمزارزی
-نیستن و CoinGecko نرخ تومنی نداره).
+Railway) دیگه نمی‌تونن بهش وصل بشن. برای همین قیمت رمزارزها الان از
+CoinGecko (بین‌المللی، رایگان، بدون محدودیت جغرافیایی) گرفته می‌شه، با
+نمودار ۷ روزه‌ی واقعی. دلار، یورو و طلا هنوز از tgju میان، ولی چون
+tgju نمودار تاریخی نمی‌ده، کارتشون بدون نمودار می‌مونه.
 
-اگه یه روز tgju هم از دسترس خارج از ایران خارج بشه، باید یه منبع نرخ دلار
-دیگه (مثل bonbast یا alanchand) جایگزینش بشه - این تابع‌ها جدا نوشته شدن
-تا جایگزین کردنشون ساده باشه.
+نکته درباره‌ی کلید یورو تو tgju:
+کلید 'price_eur' یه حدسه (چون نمی‌تونم مستقیم tgju رو تست کنم). اگه یورو
+جواب نداد، پیام خطا دقیقاً می‌گه مشکل کجاست تا کلید درست رو پیدا کنیم.
+
+نکته درباره‌ی فونت اعداد:
+اگه فایل assets/Poppins-Bold.ttf وجود داشته باشه، اعداد قیمت و درصد باهاش
+نوشته می‌شن؛ وگرنه از همون فونت پیش‌فرض استفاده می‌شه. متن فارسی همیشه
+با Vazirmatn نوشته می‌شه.
 """
 
 import io
 import os
+import math
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -28,22 +33,23 @@ from telegram.ext import ContextTypes
 import arabic_reshaper
 from bidi.algorithm import get_display
 
-COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
+COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets"
 TGJU_URL = "https://call4.tgju.org/ajax.json"
 
-# دلار و طلا رمزارز نیستن، برای همین از یه منبع عمومی دیگه (tgju) میان
+USER_AGENT = "Mozilla/5.0 (compatible; TelegramBot/1.0; +https://core.telegram.org/bots)"
+
+# دلار، یورو و طلا رمزارز نیستن، برای همین از یه منبع عمومی دیگه (tgju) میان
 FIAT_GOLD_MAP = {
     "دلار": ("price_dollar_rl", "💵", "dollar"),
+    "یورو": ("price_eur", "💶", "euro"),
     "طلا": ("geram18", "🥇", "gold"),
 }
 
-# اسم فارسی -> (نماد کوتاه, ایموجی)
+# اسم فارسی -> (نماد کوتاه, ایموجی) — فقط همین ۳ تا رمزارز
 SYMBOL_MAP = {
     "تتر": ("usdt", "💵"),
     "بیت کوین": ("btc", "🟠"),
     "بیت‌کوین": ("btc", "🟠"),
-    "اتریوم": ("eth", "🔷"),
-    "تون": ("ton", "💎"),
     "بیت کوین کش": ("bch", "🟢"),
 }
 
@@ -51,37 +57,64 @@ SYMBOL_MAP = {
 COINGECKO_IDS = {
     "usdt": "tether",
     "btc": "bitcoin",
-    "eth": "ethereum",
-    "ton": "the-open-network",
     "bch": "bitcoin-cash",
 }
 
-# ترجمه اسم هر ارز به زبان‌های دیگه (برای نمایش داخل عکس)
+# نماد کوتاه -> بج (تیکر) که رو کارت نشون داده می‌شه
+TICKERS = {
+    "usdt": "USDT",
+    "btc": "BTC",
+    "bch": "BCH",
+    "dollar": "USD",
+    "euro": "EUR",
+    "gold": "IRT",
+}
+
+# اسم هر مورد به زبان‌های دیگه (برای نمایش داخل عکس)
 NAME_TRANSLATIONS = {
     "usdt": {"fa": "تتر", "en": "Tether", "ar": "تيثر"},
     "btc": {"fa": "بیت کوین", "en": "Bitcoin", "ar": "بيتكوين"},
-    "eth": {"fa": "اتریوم", "en": "Ethereum", "ar": "إيثيريوم"},
-    "ton": {"fa": "تون", "en": "Toncoin", "ar": "تون كوين"},
     "bch": {"fa": "بیت کوین کش", "en": "Bitcoin Cash", "ar": "بيتكوين كاش"},
-    "dollar": {"fa": "دلار", "en": "US Dollar", "ar": "الدولار الأمريكي"},
+    "dollar": {"fa": "دلار آمریکا", "en": "US Dollar", "ar": "الدولار الأمريكي"},
+    "euro": {"fa": "یورو", "en": "Euro", "ar": "اليورو"},
     "gold": {"fa": "طلا (۱۸ عیار)", "en": "Gold (18k)", "ar": "الذهب (18 قيراط)"},
 }
+
+FLAG_EMOJI = {
+    "usdt": "💵",
+    "btc": "🟠",
+    "bch": "🟢",
+    "dollar": "🇺🇸",
+    "euro": "🇪🇺",
+    "gold": "🥇",
+}
+
+# رنگ اختصاصیِ هر مورد - برای تینت‌کردن کارت‌های غیرِ پرچمی (طلا و رمزارزها)
+COIN_COLORS = {
+    "btc": (247, 147, 26),
+    "usdt": (38, 161, 123),
+    "bch": (139, 195, 74),
+    "gold": (230, 175, 60),
+}
+
+# این دوتا کارتشون «پرچم» می‌شه، نه تینت تیره
+FLAG_STYLE_SYMBOLS = {"dollar", "euro"}
 
 UI_STRINGS = {
     "fa": {
         "greeting": "سلام جوان ایرانی", "price_label": "قیمت لحظه‌ای", "currency": "تومان",
         "change_suffix": "تغییر نسبت به دیروز", "updated": "بروزرسانی", "unknown": "نامشخص",
-        "grid_title": "نرخ لحظه‌ای رمزارزها", "grid_subtitle": "قدرت‌گرفته از CoinGecko",
+        "grid_title": "نرخ لحظه‌ای بازار", "grid_subtitle": "قدرت‌گرفته از CoinGecko",
     },
     "en": {
         "greeting": "Hello Iranian Youth", "price_label": "Live Price", "currency": "Toman",
         "change_suffix": "change vs yesterday", "updated": "Updated", "unknown": "N/A",
-        "grid_title": "Live Crypto Rates", "grid_subtitle": "Powered by CoinGecko",
+        "grid_title": "Live Market Rates", "grid_subtitle": "Powered by CoinGecko",
     },
     "ar": {
         "greeting": "مرحباً أيها الشاب الإيراني", "price_label": "السعر اللحظي", "currency": "تومان",
         "change_suffix": "التغيير مقارنة بالأمس", "updated": "آخر تحديث", "unknown": "غير معروف",
-        "grid_title": "أسعار العملات الرقمية اللحظية", "grid_subtitle": "مدعوم من CoinGecko",
+        "grid_title": "أسعار السوق اللحظية", "grid_subtitle": "مدعوم من CoinGecko",
     },
 }
 
@@ -98,16 +131,27 @@ def _tr_name(symbol, lang):
 def _ui(lang, key):
     return UI_STRINGS.get(lang, UI_STRINGS["fa"]).get(key, UI_STRINGS["fa"][key])
 
-FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "Vazirmatn-Bold.ttf")
-FALLBACK_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "DejaVuSans-Bold.ttf")
+
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+FONT_PATH = os.path.join(ASSETS_DIR, "Vazirmatn-Bold.ttf")
+FALLBACK_FONT_PATH = os.path.join(ASSETS_DIR, "DejaVuSans-Bold.ttf")
+NUMBER_FONT_PATH = os.path.join(ASSETS_DIR, "Poppins-Bold.ttf")
 
 
 def _get_font(size):
+    """فونت متن فارسی (اسم‌ها، برچسب‌ها)"""
     if os.path.exists(FONT_PATH):
         return ImageFont.truetype(FONT_PATH, size)
     if os.path.exists(FALLBACK_FONT_PATH):
         return ImageFont.truetype(FALLBACK_FONT_PATH, size)
     return ImageFont.load_default()
+
+
+def _get_number_font(size):
+    """فونت اعداد (قیمت، درصد) - اگه Poppins-Bold.ttf تو assets باشه، همونه"""
+    if os.path.exists(NUMBER_FONT_PATH):
+        return ImageFont.truetype(NUMBER_FONT_PATH, size)
+    return _get_font(size)
 
 
 def _fa(text: str) -> str:
@@ -116,46 +160,51 @@ def _fa(text: str) -> str:
     return get_display(reshaped)
 
 
+def _coin_color(symbol):
+    return COIN_COLORS.get(symbol, (147, 51, 234))
+
+
 # ---------------------------------------------------------------------------
-# دریافت داده: CoinGecko برای رمزارزها، tgju برای نرخ دلار/طلا
+# دریافت داده: CoinGecko برای رمزارزها (با نمودار ۷ روزه)، tgju برای دلار/یورو/طلا
 # ---------------------------------------------------------------------------
 
-def fetch_coingecko_data():
-    """قیمت دلاریِ همه‌ی رمزارزهای موردنیاز رو یکجا از CoinGecko می‌گیره"""
+def fetch_coingecko_markets():
     ids = ",".join(sorted(set(COINGECKO_IDS.values())))
     params = {
+        "vs_currency": "usd",
         "ids": ids,
-        "vs_currencies": "usd",
-        "include_24hr_change": "true",
+        "sparkline": "true",
+        "price_change_percentage": "24h",
     }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; TelegramBot/1.0; +https://core.telegram.org/bots)"
-    }
-    resp = requests.get(COINGECKO_URL, params=params, headers=headers, timeout=15)
+    headers = {"User-Agent": USER_AGENT}
+    resp = requests.get(COINGECKO_MARKETS_URL, params=params, headers=headers, timeout=15)
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    return {item["id"]: item for item in data}
 
 
-def get_price_toman(cg_data: dict, symbol: str, usd_to_toman):
-    """
-    قیمت یک رمزارز به تومان + درصد تغییر ۲۴ ساعته رو برمی‌گردونه.
-    usd_to_toman: نرخ لحظه‌ایِ هر دلار به تومان (از tgju)
-    """
+def get_price_toman(markets_data: dict, symbol: str, usd_to_toman):
     cg_id = COINGECKO_IDS.get(symbol)
     if not cg_id:
-        return None, None
-    entry = cg_data.get(cg_id)
+        return None, None, None
+    entry = markets_data.get(cg_id)
     if not entry:
-        return None, None
-    usd_price = entry.get("usd")
-    change = entry.get("usd_24h_change")
+        return None, None, None
+
+    usd_price = entry.get("current_price")
+    change = entry.get("price_change_percentage_24h")
+    sparkline = None
+    sp = entry.get("sparkline_in_7d") or {}
+    if sp.get("price"):
+        sparkline = sp["price"]
+
     if usd_price is None or usd_to_toman is None:
-        return None, change
+        return None, change, sparkline
     try:
         price_toman = int(float(usd_price) * float(usd_to_toman))
     except (TypeError, ValueError):
-        return None, change
-    return price_toman, change
+        return None, change, sparkline
+    return price_toman, change, sparkline
 
 
 def fetch_tgju_data():
@@ -166,7 +215,7 @@ def fetch_tgju_data():
 
 
 def get_fiat_gold_price(tgju_data: dict, key: str):
-    """قیمت دلار/طلا به تومان + درصد تغییر رو برمی‌گردونه، یا None اگه پیدا نشد"""
+    """قیمت دلار/یورو/طلا به تومان + درصد تغییر رو برمی‌گردونه، یا None اگه پیدا نشد"""
     entry = tgju_data.get(key)
     if not entry:
         return None, None
@@ -185,112 +234,13 @@ def get_fiat_gold_price(tgju_data: dict, key: str):
 
 
 def get_usd_to_toman_rate(tgju_data: dict):
-    """نرخ لحظه‌ایِ هر دلار به تومان (برای تبدیل قیمت دلاریِ رمزارزها)"""
     rate, _ = get_fiat_gold_price(tgju_data, "price_dollar_rl")
     return rate
 
 
-def _card_color(day_change):
-    try:
-        if day_change is not None and float(day_change) < 0:
-            return (255, 90, 90)  # قرمز برای منفی
-    except (TypeError, ValueError):
-        pass
-    return (90, 200, 130)  # سبز برای مثبت یا نامشخص
-
-
-COIN_COLORS = {
-    "btc": (247, 147, 26),
-    "eth": (98, 126, 234),
-    "usdt": (38, 161, 123),
-    "ton": (0, 152, 234),
-    "bch": (139, 195, 74),
-}
-
-
-def _coin_color(symbol):
-    return COIN_COLORS.get(symbol, (147, 51, 234))
-
-
-def render_grid_image(rows: list, lang: str = "fa") -> Image.Image:
-    """rows: لیستی از (نماد, قیمت تومان, درصد تغییر) - خروجی همیشه با نسبت ۱۶:۹"""
-    width, height = 1600, 900  # نسبت دقیق 16:9، هماهنگ با کارت‌های تکی
-    panel_margin = 50
-
-    img = _load_background(width, height)
-    img = _glass_panel(img, panel_margin, panel_margin, width - panel_margin, height - panel_margin, blur=7)
-    draw = ImageDraw.Draw(img)
-
-    title_font = _get_font(40)
-    sub_font = _get_font(22)
-    name_font = _get_font(24)
-    price_font = _get_font(28)
-    change_font = _get_font(19)
-
-    title = _fa(_ui(lang, "grid_title"))
-    tw = draw.textlength(title, font=title_font)
-    draw.text(((width - tw) / 2, panel_margin + 26), title, font=title_font, fill=(255, 255, 255))
-
-    sub = _fa(_ui(lang, "grid_subtitle"))
-    sw = draw.textlength(sub, font=sub_font)
-    draw.text(((width - sw) / 2, panel_margin + 78), sub, font=sub_font, fill=(225, 215, 235))
-
-    # ===== محاسبه‌ی چیدمان گرید تا داخل فریم ۱۶:۹ جا بشه =====
-    n = len(rows)
-    cols = 4 if n > 4 else max(1, n)
-    grid_rows = (n + cols - 1) // cols
-
-    inner_x0 = panel_margin + 34
-    inner_x1 = width - panel_margin - 34
-    grid_top = panel_margin + 130
-    grid_bottom = height - panel_margin - 30
-
-    gap = 22
-    available_w = inner_x1 - inner_x0
-    available_h = grid_bottom - grid_top
-
-    card_w = (available_w - (cols - 1) * gap) / cols
-    card_h = (available_h - (grid_rows - 1) * gap) / grid_rows
-
-    for i, (symbol, price, change) in enumerate(rows):
-        name = _tr_name(symbol, lang)
-        r, c = divmod(i, cols)
-        x = inner_x0 + c * (card_w + gap)
-        y = grid_top + r * (card_h + gap)
-
-        accent = _coin_color(symbol)
-        change_color = _card_color(change)
-
-        shade = tuple(int(a * 0.14 + b * 0.86) for a, b in zip(accent, (255, 255, 255)))
-        draw.rounded_rectangle(
-            [x, y, x + card_w, y + card_h], radius=18,
-            fill=None, outline=accent, width=2
-        )
-
-        pad = 18
-        name_text = _fa(name)
-        draw.text((x + pad, y + pad - 4), name_text, font=name_font, fill=(255, 255, 255))
-
-        price_text = _fa(f"{price:,} تومان") if price is not None else _fa("نامشخص")
-        available_width = card_w - pad * 2
-        fitted_font = price_font
-        fitted_size = 28
-        while draw.textlength(price_text, font=fitted_font) > available_width and fitted_size > 14:
-            fitted_size -= 2
-            fitted_font = _get_font(fitted_size)
-        draw.text((x + pad, y + card_h * 0.46), price_text, font=fitted_font, fill=(255, 210, 90))
-
-        if change is not None:
-            try:
-                change_val = float(change)
-                sign = "+" if change_val >= 0 else ""
-                change_text = f"{sign}{change_val:.2f}%"
-                draw.text((x + pad, y + card_h - 32), change_text, font=change_font, fill=change_color)
-            except (TypeError, ValueError):
-                pass
-
-    return img
-
+# ---------------------------------------------------------------------------
+# پس‌زمینه‌ی کلیِ عکس (پشت همه‌ی کارت‌ها)
+# ---------------------------------------------------------------------------
 
 def _vertical_gradient(width, height, top_color, bottom_color):
     img = Image.new("RGB", (width, height), top_color)
@@ -304,64 +254,12 @@ def _vertical_gradient(width, height, top_color, bottom_color):
     return img
 
 
-def _add_glow(img, cx, cy, radius, color, intensity=90):
-    """یه هاله‌ی نوری تار (glow) پشت صحنه اضافه می‌کنه"""
-    glow_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    gdraw = ImageDraw.Draw(glow_layer)
-    gdraw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=(*color, intensity))
-    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius / 2))
-    img.paste(Image.alpha_composite(img.convert("RGBA"), glow_layer).convert("RGB"), (0, 0))
-    return img
+BG_IMAGE_PATH = os.path.join(ASSETS_DIR, "price_card_bg.jpg")
 
 
-def _draw_floor_grid(draw, width, height, top_y, color=(90, 60, 140), lines=8):
-    """یه شبکه‌ی خطوط رو به پایین (حس کف براق) برای تزئین گوشه‌ها می‌کشه"""
-    for i in range(lines + 1):
-        x = width * i / lines
-        draw.line([(x, height), (width / 2 + (x - width / 2) * 0.15, top_y)], fill=color, width=1)
-    for i in range(4):
-        t = i / 3
-        y = top_y + (height - top_y) * t
-        shrink = (1 - t) * 0.42
-        draw.line([(width * shrink, y), (width * (1 - shrink), y)], fill=color, width=1)
-
-
-def _draw_candles(draw, x0, y0, width, height, up_color=(90, 200, 130), down_color=(230, 90, 90)):
-    """چند تا کندل‌استیک کوچیک تزئینی (شبیه نمودار بورس) می‌کشه"""
-    import random
-    rnd = random.Random(7)  # سید ثابت تا هر بار یه شکل ثابت و قشنگ بکشه
-    n = 10
-    cw = width / (n * 1.6)
-    x = x0
-    prev = y0 + height * 0.55
-    for i in range(n):
-        body_h = rnd.randint(int(height * 0.06), int(height * 0.22))
-        up = rnd.random() > 0.42
-        color = up_color if up else down_color
-        top = prev - body_h if up else prev
-        bottom = prev if up else prev + body_h
-        wick = rnd.randint(6, 22)
-        draw.line([(x + cw / 2, top - wick), (x + cw / 2, bottom + wick)], fill=color, width=2)
-        draw.rectangle([x, top, x + cw, bottom], fill=color)
-        prev = top if up else bottom
-        prev += rnd.randint(-10, 10)
-        x += cw * 1.6
-
-
-def _draw_corner_ornaments(draw, x0, y0, x1, y1, color, size=26):
-    """چهار خط تزئینی گوشه‌ی کادر، برای حس شیک‌تر بدون نیاز به فونت خاص"""
-    for (cx, cy, dx, dy) in [(x0, y0, 1, 1), (x1, y0, -1, 1), (x0, y1, 1, -1), (x1, y1, -1, -1)]:
-        draw.line([(cx, cy), (cx + size * dx, cy)], fill=color, width=4)
-        draw.line([(cx, cy), (cx, cy + size * dy)], fill=color, width=4)
-
-
-BG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.jpg")
-
-
-def _load_background(width, height):
-    """پس‌زمینه واقعی رو می‌گیره، برش می‌زنه که کامل قاب رو پر کنه، و کمی تیره‌ترش می‌کنه"""
+def _load_background(width, height, blur=3, darken=120):
     if not os.path.exists(BG_IMAGE_PATH):
-        return _vertical_gradient(width, height, (18, 10, 34), (6, 4, 14))
+        return _vertical_gradient(width, height, (24, 14, 40), (10, 6, 18))
 
     bg = Image.open(BG_IMAGE_PATH).convert("RGB")
     src_w, src_h = bg.size
@@ -373,97 +271,185 @@ def _load_background(width, height):
         bg = bg.crop((left, 0, left + new_w, src_h))
     else:
         new_h = int(src_w / target_ratio)
-        top = (src_h - new_h) // 3  # کمی از بالا برش بخوره که کوین‌ها بمونن
+        top = (src_h - new_h) // 3
         bg = bg.crop((0, top, src_w, top + new_h))
     bg = bg.resize((width, height), Image.LANCZOS)
 
-    # یه لایه تیره‌ی نیمه‌شفاف رو کل عکس، که متن روش خواناتر بشه
-    overlay = Image.new("RGBA", (width, height), (8, 4, 18, 110))
+    if blur:
+        bg = bg.filter(ImageFilter.GaussianBlur(blur))
+
+    overlay = Image.new("RGBA", (width, height), (8, 4, 18, darken))
     bg = Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
     return bg
 
 
-def _glass_panel(img, x0, y0, x1, y1, radius=32, blur=14, white_mix=0.06):
-    """
-    افکت شیشه‌ی مات واقعی (مثل پنل‌های iOS): همون قسمت از پس‌زمینه رو
-    بلور می‌کنه، یه‌کم سفید باهاش قاطی می‌کنه (حس شیشه‌ی مه‌گرفته)،
-    و با یه ماسک گردشده جاش می‌ذاره. بدون خط دور، بدون کادر اضافه.
-    """
-    x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
-    region = img.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(blur))
-    white_layer = Image.new("RGB", region.size, (255, 255, 255))
-    region = Image.blend(region, white_layer, white_mix)
+# ---------------------------------------------------------------------------
+# پرچم‌های رسم‌شده با کد (نه عکس دانلودی) - فقط برای دلار و یورو
+# ---------------------------------------------------------------------------
 
-    mask = Image.new("L", region.size, 0)
-    mdraw = ImageDraw.Draw(mask)
-    mdraw.rounded_rectangle([0, 0, region.size[0] - 1, region.size[1] - 1], radius=radius, fill=255)
+def _make_flag_image(kind, w, h):
+    w, h = max(1, int(w)), max(1, int(h))
+    img = Image.new("RGB", (w, h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
 
-    img = img.copy()
-    img.paste(region, (x0, y0), mask)
+    if kind == "dollar":
+        stripes = 13
+        stripe_h = h / stripes
+        for i in range(stripes):
+            color = (178, 34, 52) if i % 2 == 0 else (255, 255, 255)
+            draw.rectangle([0, i * stripe_h, w, (i + 1) * stripe_h], fill=color)
+        canton_w, canton_h = w * 0.4, h * 7 / 13
+        draw.rectangle([0, 0, canton_w, canton_h], fill=(60, 59, 110))
+        # چندتا نقطه‌ی ساده به‌جای ستاره‌های دقیق، فقط برای حس پرچم
+        rows, cols = 5, 6
+        for rr in range(rows):
+            for cc in range(cols):
+                sx = canton_w * (cc + 0.5) / cols
+                sy = canton_h * (rr + 0.5) / rows
+                r = min(canton_w, canton_h) * 0.035
+                draw.ellipse([sx - r, sy - r, sx + r, sy + r], fill=(255, 255, 255))
+
+    elif kind == "euro":
+        draw.rectangle([0, 0, w, h], fill=(0, 51, 153))
+        cx, cy = w / 2, h / 2
+        R = min(w, h) * 0.30
+        for i in range(12):
+            angle = math.radians(i * 30 - 90)
+            sx, sy = cx + R * math.cos(angle), cy + R * math.sin(angle)
+            r = min(w, h) * 0.032
+            draw.ellipse([sx - r, sy - r, sx + r, sy + r], fill=(255, 204, 0))
+
     return img
 
 
-def render_single_card(symbol: str, price, change, lang: str = "fa", extra_info=None) -> Image.Image:
-    width, height = 1200, 675  # نسبت دقیق 16:9
-    gold = (235, 180, 90)  # طلایی/کهربایی هماهنگ با پس‌زمینه
-    name = _tr_name(symbol, lang)
+def _draw_sparkline(img: Image.Image, x0, y0, x1, y1, prices, up: bool):
+    """یه نمودار ناحیه‌ای (area chart) ساده از لیست قیمت‌ها می‌کشه"""
+    if not prices or len(prices) < 2:
+        return img
+    w = x1 - x0
+    h = y1 - y0
+    lo, hi = min(prices), max(prices)
+    rng = (hi - lo) or (hi * 0.01 or 1)
+    n = len(prices)
 
-    img = _load_background(width, height)
+    pts = []
+    for i, p in enumerate(prices):
+        px = x0 + (i / (n - 1)) * w
+        py = y1 - ((p - lo) / rng) * h
+        pts.append((px, py))
 
-    # پنل شیشه‌ای مات (بدون خط دور، بدون گوشه‌های تزئینی)
-    panel_margin = 70
-    img = _glass_panel(img, panel_margin, panel_margin, width - panel_margin, height - panel_margin)
+    color = (96, 210, 140) if up else (230, 95, 95)
+
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    poly = pts + [(x1, y1), (x0, y1)]
+    odraw.polygon(poly, fill=(*color, 55))
+    odraw.line(pts, fill=(*color, 255), width=3, joint="curve")
+
+    return Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
+
+def _draw_price_card(img, x, y, w, h, symbol, badge_text, title_text, price_text,
+                      change, sparkline=None, big=False):
+    """
+    اگه symbol جزو FLAG_STYLE_SYMBOLS باشه (دلار/یورو): پس‌زمینه‌ی کارت
+    پرچمِ همون کشور می‌شه و یه کارت روشن داخلش برای متن می‌ذاریم (مثل نمونه).
+    وگرنه (طلا/رمزارزها): همون کارت تیره‌ی تینت‌شده‌ی قبلی.
+    """
+    is_flag = symbol in FLAG_STYLE_SYMBOLS
+
+    if is_flag:
+        flag_img = _make_flag_image(symbol, w, h)
+        mask = Image.new("L", (int(w), int(h)), 0)
+        mdraw = ImageDraw.Draw(mask)
+        mdraw.rounded_rectangle([0, 0, int(w) - 1, int(h) - 1], radius=26, fill=255)
+        img = img.copy()
+        img.paste(flag_img, (int(x), int(y)), mask)
+
+        inner_pad = 22
+        ix0, iy0 = x + inner_pad, y + inner_pad
+        ix1, iy1 = x + w - inner_pad, y + h - inner_pad
+
+        light_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        ldraw = ImageDraw.Draw(light_layer)
+        ldraw.rounded_rectangle([ix0, iy0, ix1, iy1], radius=20, fill=(250, 250, 252, 240))
+        img = Image.alpha_composite(img.convert("RGBA"), light_layer).convert("RGB")
+
+        x, y, w, h = ix0, iy0, ix1 - ix0, iy1 - iy0
+        title_color = (30, 30, 40)
+        price_color = (20, 20, 30)
+        badge_bg = (235, 235, 240, 255)
+        badge_fg = (60, 60, 70)
+    else:
+        accent = _coin_color(symbol)
+        base = (14, 11, 24)
+        tinted = tuple(int(a * 0.22 + b * 0.78) for a, b in zip(accent, base))
+
+        card_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        cdraw = ImageDraw.Draw(card_layer)
+        cdraw.rounded_rectangle([x, y, x + w, y + h], radius=26, fill=(*tinted, 235))
+        cdraw.rounded_rectangle([x, y, x + w, y + h], radius=26, outline=(*accent, 160), width=2)
+        img = Image.alpha_composite(img.convert("RGBA"), card_layer).convert("RGB")
+
+        title_color = (255, 255, 255)
+        price_color = (255, 215, 110)
+        badge_bg = (255, 255, 255, 28)
+        badge_fg = (235, 230, 245)
+
     draw = ImageDraw.Draw(img)
+    pad = 24 if big else 18
+    badge_font = _get_font(22 if big else 17)
+    title_font = _get_font(30 if big else 21)
+    price_font = _get_number_font(58 if big else 34)
+    change_font = _get_number_font(22 if big else 16)
 
-    greeting_font = _get_font(24)
-    name_font = _get_font(54)
-    price_label_font = _get_font(24)
-    price_font = _get_font(72)
-    change_font = _get_font(30)
-    footer_font = _get_font(20)
-    detail_font = _get_font(22)
+    # ===== بج بالا-چپ (تیکر) =====
+    bw = draw.textlength(badge_text, font=badge_font) + 24
+    bh = 38 if big else 28
+    draw.rounded_rectangle([x + pad, y + pad, x + pad + bw, y + pad + bh], radius=bh / 2, fill=badge_bg)
+    draw.text((x + pad + 12, y + pad + bh / 2 - (badge_font.size / 2) - 2), badge_text, font=badge_font, fill=badge_fg)
 
-    greeting_text = _fa(_ui(lang, "greeting"))
-    gw = draw.textlength(greeting_text, font=greeting_font)
-    draw.text(((width - gw) / 2, 118), greeting_text, font=greeting_font, fill=(235, 225, 210))
+    # ===== عنوان بالا-راست =====
+    title_disp = _fa(title_text)
+    tw = draw.textlength(title_disp, font=title_font)
+    draw.text((x + w - pad - tw, y + pad + (bh - title_font.size) / 2 - 2), title_disp, font=title_font, fill=title_color)
 
-    name_text = _fa(name)
-    nw = draw.textlength(name_text, font=name_font)
-    draw.text(((width - nw) / 2, 168), name_text, font=name_font, fill=(255, 255, 255))
+    # ===== قیمت بزرگ =====
+    price_y = y + pad + bh + (26 if big else 16)
+    if price_text:
+        draw.text((x + pad, price_y), price_text, font=price_font, fill=price_color)
+        price_h = price_font.size
+    else:
+        price_h = 0
 
-    price_label = _fa(_ui(lang, "price_label"))
-    plw = draw.textlength(price_label, font=price_label_font)
-    draw.text(((width - plw) / 2, 272), price_label, font=price_label_font, fill=(225, 210, 190))
-
-    currency = _ui(lang, "currency")
-    price_text = _fa(f"{price:,} {currency}") if price is not None else _fa(_ui(lang, "unknown"))
-    pw = draw.textlength(price_text, font=price_font)
-    draw.text(((width - pw) / 2, 306), price_text, font=price_font, fill=gold)
-
-    y_cursor = 400
-    color = _card_color(change)
+    # ===== پیل رنگیِ درصد تغییر =====
+    up = True
+    chip_y = price_y + price_h + (14 if big else 8)
     if change is not None:
         try:
             change_val = float(change)
-            sign = "+" if change_val >= 0 else ""
-            change_text = _fa(f"{sign}{change_val:.2f}٪ {_ui(lang, 'change_suffix')}")
-            cw = draw.textlength(change_text, font=change_font)
-            draw.text(((width - cw) / 2, y_cursor), change_text, font=change_font, fill=color)
-            y_cursor += 48
+            up = change_val >= 0
+            arrow = "▲" if up else "▼"
+            sign = "+" if up else ""
+            chg_text = f"{arrow} {sign}{change_val:.2f}%"
+            chg_color = (40, 150, 85) if up else (195, 60, 60)
+            cw = draw.textlength(chg_text, font=change_font) + 22
+            ch = change_font.size + 16
+            draw.rounded_rectangle([x + pad, chip_y, x + pad + cw, chip_y + ch], radius=ch / 2, fill=chg_color)
+            draw.text((x + pad + 11, chip_y + 8), chg_text, font=change_font, fill=(255, 255, 255))
+            chip_y += ch
         except (TypeError, ValueError):
             pass
 
-    if extra_info:
-        for line in extra_info:
-            line_text = _fa(line)
-            lw = draw.textlength(line_text, font=detail_font)
-            draw.text(((width - lw) / 2, y_cursor), line_text, font=detail_font, fill=(210, 205, 220))
-            y_cursor += 34
-
-    from persian_date import format_persian_datetime
-    footer_text = _fa(f"{_ui(lang, 'updated')}: {format_persian_datetime()}")
-    fw = draw.textlength(footer_text, font=footer_font)
-    draw.text(((width - fw) / 2, height - panel_margin - 44), footer_text, font=footer_font, fill=(220, 205, 180))
+    # ===== نمودار ۷ روزه (فقط رمزارزها، چون دلار/یورو/طلا نمودار ندارن) =====
+    if sparkline and len(sparkline) > 1:
+        chart_x0 = x + pad
+        chart_x1 = x + w - pad
+        chart_y1 = y + h - (pad - 4)
+        chart_top_limit = chip_y + 10
+        chart_h = max(30, chart_y1 - chart_top_limit)
+        chart_y0 = chart_y1 - chart_h
+        img = _draw_sparkline(img, chart_x0, chart_y0, chart_x1, chart_y1, sparkline, up)
 
     return img
 
@@ -476,42 +462,86 @@ def _image_to_bytes(img: Image.Image) -> io.BytesIO:
     return buf
 
 
-async def cmd_crypto_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import database as db
-    chat = update.effective_chat
-    lang = db.get_image_lang(chat.id) if chat and chat.type in ("group", "supergroup") else "fa"
+# ---------------------------------------------------------------------------
+# ساخت عکسِ نهایی (چه تکی، چه گرید)
+# ---------------------------------------------------------------------------
 
-    try:
-        try:
-            tgju_data = fetch_tgju_data()
-            usd_toman = get_usd_to_toman_rate(tgju_data)
-        except Exception as e:
-            await update.effective_message.reply_text(f"❌ نتونستم نرخ دلار رو بگیرم (لازم برای تبدیل قیمت‌ها به تومان).\n{e}")
-            return
+def render_single_card(symbol: str, price, change, lang: str = "fa", sparkline=None) -> Image.Image:
+    width, height = 1200, 675  # نسبت دقیق 16:9
+    img = _load_background(width, height)
 
-        try:
-            cg_data = fetch_coingecko_data()
-        except Exception as e:
-            await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
-            return
+    name = _tr_name(symbol, lang)
+    title_text = f"{FLAG_EMOJI.get(symbol, '')} {name}"
+    badge_text = TICKERS.get(symbol, symbol.upper())
+    currency = _ui(lang, "currency")
+    price_text = f"{price:,} {currency}" if price is not None else _ui(lang, "unknown")
 
-        seen_symbols = set()
-        rows = []
-        for name, (symbol, emoji) in SYMBOL_MAP.items():
-            if symbol in seen_symbols:  # از دو تا املای بیت‌کوین فقط یکی تو گرید بیاد
-                continue
-            seen_symbols.add(symbol)
-            price, change = get_price_toman(cg_data, symbol, usd_toman)
-            rows.append((symbol, price, change))
+    card_margin = 60
+    img = _draw_price_card(
+        img, card_margin, card_margin,
+        width - 2 * card_margin, height - 2 * card_margin,
+        symbol, badge_text, title_text, price_text, change, sparkline=sparkline, big=True
+    )
 
-        img = render_grid_image(rows, lang=lang)
-        from persian_date import format_persian_datetime
-        caption = f"{_ui(lang, 'grid_title')} — {_ui(lang, 'updated')}: {format_persian_datetime()}"
-        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
-    except Exception as e:
-        # اگه هرجای دیگه‌ای (مثلاً موقع ساختن عکس) خطای پیش‌بینی‌نشده‌ای بیفته،
-        # لااقل یه پیام واضح بفرست، نه سکوت کامل
-        await update.effective_message.reply_text(f"❌ خطای غیرمنتظره تو ساختن جدول قیمت‌ها.\n{e}")
+    draw = ImageDraw.Draw(img)
+    footer_font = _get_font(18)
+    from persian_date import format_persian_datetime
+    footer_text = _fa(f"{_ui(lang, 'updated')}: {format_persian_datetime()}")
+    fw = draw.textlength(footer_text, font=footer_font)
+    draw.text(((width - fw) / 2, height - 34), footer_text, font=footer_font, fill=(210, 200, 220))
+
+    return img
+
+
+def render_grid_image(items: list, lang: str = "fa") -> Image.Image:
+    """items: لیستی از دیکشنری {"symbol":, "price":, "change":, "sparkline":}"""
+    width, height = 1600, 900
+    img = _load_background(width, height)
+    draw = ImageDraw.Draw(img)
+
+    title_font = _get_font(38)
+    sub_font = _get_font(20)
+
+    title = _fa(_ui(lang, "grid_title"))
+    tw = draw.textlength(title, font=title_font)
+    draw.text(((width - tw) / 2, 34), title, font=title_font, fill=(255, 255, 255))
+
+    sub = _fa(_ui(lang, "grid_subtitle"))
+    sw = draw.textlength(sub, font=sub_font)
+    draw.text(((width - sw) / 2, 82), sub, font=sub_font, fill=(215, 205, 230))
+
+    n = len(items)
+    cols = 3 if n > 2 else n
+    grid_rows = (n + cols - 1) // cols
+
+    margin = 40
+    top = 130
+    gap = 22
+    available_w = width - 2 * margin
+    available_h = height - top - margin
+
+    card_w = (available_w - (cols - 1) * gap) / cols
+    card_h = (available_h - (grid_rows - 1) * gap) / grid_rows
+
+    for i, item in enumerate(items):
+        symbol = item["symbol"]
+        price = item["price"]
+        change = item["change"]
+        sparkline = item.get("sparkline")
+
+        r, c = divmod(i, cols)
+        x = margin + c * (card_w + gap)
+        y = top + r * (card_h + gap)
+
+        name = _tr_name(symbol, lang)
+        title_text = f"{FLAG_EMOJI.get(symbol, '')} {name}"
+        badge_text = TICKERS.get(symbol, symbol.upper())
+        currency = _ui(lang, "currency")
+        price_text = f"{price:,} {currency}" if price is not None else _ui(lang, "unknown")
+
+        img = _draw_price_card(img, x, y, card_w, card_h, symbol, badge_text, title_text, price_text, change, sparkline=sparkline)
+
+    return img
 
 
 def _build_caption(symbol, price, change, lang="fa"):
@@ -539,6 +569,51 @@ def _build_caption(symbol, price, change, lang="fa"):
     return text
 
 
+# ---------------------------------------------------------------------------
+# دستورها
+# ---------------------------------------------------------------------------
+
+async def cmd_crypto_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import database as db
+    chat = update.effective_chat
+    lang = db.get_image_lang(chat.id) if chat and chat.type in ("group", "supergroup") else "fa"
+
+    try:
+        try:
+            tgju_data = fetch_tgju_data()
+            usd_toman = get_usd_to_toman_rate(tgju_data)
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم نرخ دلار رو بگیرم (لازم برای تبدیل قیمت‌ها به تومان).\n{e}")
+            return
+
+        try:
+            cg_data = fetch_coingecko_markets()
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
+            return
+
+        items = []
+
+        seen_symbols = set()
+        for name, (symbol, emoji) in SYMBOL_MAP.items():
+            if symbol in seen_symbols:
+                continue
+            seen_symbols.add(symbol)
+            price, change, sparkline = get_price_toman(cg_data, symbol, usd_toman)
+            items.append({"symbol": symbol, "price": price, "change": change, "sparkline": sparkline})
+
+        for name, (key, emoji, trans_key) in FIAT_GOLD_MAP.items():
+            price, change = get_fiat_gold_price(tgju_data, key)
+            items.append({"symbol": trans_key, "price": price, "change": change, "sparkline": None})
+
+        img = render_grid_image(items, lang=lang)
+        from persian_date import format_persian_datetime
+        caption = f"{_ui(lang, 'grid_title')} — {_ui(lang, 'updated')}: {format_persian_datetime()}"
+        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+    except Exception as e:
+        await update.effective_message.reply_text(f"❌ خطای غیرمنتظره تو ساختن جدول قیمت‌ها.\n{e}")
+
+
 async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import database as db
     text = (update.effective_message.text or "").strip()
@@ -553,7 +628,12 @@ async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_message.reply_text(f"❌ نتونستم قیمت {text} رو بگیرم.\n{e}")
             return
         price, change = get_fiat_gold_price(tgju_data, key)
-        img = render_single_card(trans_key, price, change, lang=lang)
+        if price is None:
+            await update.effective_message.reply_text(
+                f"❌ نتونستم قیمت {text} رو پیدا کنم. (کلید '{key}' تو دیتای tgju پیدا نشد؛ ممکنه اسم کلید عوض شده باشه.)"
+            )
+            return
+        img = render_single_card(trans_key, price, change, lang=lang, sparkline=None)
         caption = _build_caption(trans_key, price, change, lang=lang)
         await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
         return
@@ -572,13 +652,13 @@ async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         try:
-            cg_data = fetch_coingecko_data()
+            cg_data = fetch_coingecko_markets()
         except Exception as e:
             await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
             return
 
-        price, change = get_price_toman(cg_data, symbol, usd_toman)
-        img = render_single_card(symbol, price, change, lang=lang)
+        price, change, sparkline = get_price_toman(cg_data, symbol, usd_toman)
+        img = render_single_card(symbol, price, change, lang=lang, sparkline=sparkline)
         caption = _build_caption(symbol, price, change, lang=lang)
         await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
     except Exception as e:
