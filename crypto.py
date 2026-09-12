@@ -349,7 +349,7 @@ def _draw_sparkline(img: Image.Image, x0, y0, x1, y1, prices, up: bool):
     return Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 
 
-def _draw_price_card(img, x, y, w, h, symbol, badge_text, title_text, price_text,
+def _draw_price_card(img, x, y, w, h, symbol, badge_text, title_text, price, currency_word, unknown_word,
                       change, sparkline=None, big=False):
     """
     اگه symbol جزو FLAG_STYLE_SYMBOLS باشه (دلار/یورو): پس‌زمینه‌ی کارت
@@ -414,29 +414,51 @@ def _draw_price_card(img, x, y, w, h, symbol, badge_text, title_text, price_text
     tw = draw.textlength(title_disp, font=title_font)
     draw.text((x + w - pad - tw, y + pad + (bh - title_font.size) / 2 - 2), title_disp, font=title_font, fill=title_color)
 
-    # ===== قیمت بزرگ =====
+    # ===== قیمت بزرگ (عدد با فونت لاتین، «تومان» با فونت فارسی - جدا از هم) =====
     price_y = y + pad + bh + (26 if big else 16)
-    if price_text:
-        draw.text((x + pad, price_y), price_text, font=price_font, fill=price_color)
+    price_h = 0
+    if price is not None:
+        num_str = f"{price:,}"
+        draw.text((x + pad, price_y), num_str, font=price_font, fill=price_color)
+        num_w = draw.textlength(num_str, font=price_font)
+        currency_font = _get_font(int(price_font.size * 0.42))
+        currency_disp = _fa(currency_word)
+        draw.text(
+            (x + pad + num_w + 12, price_y + price_font.size - currency_font.size - 4),
+            currency_disp, font=currency_font, fill=price_color
+        )
         price_h = price_font.size
     else:
-        price_h = 0
+        unknown_font = _get_font(int(price_font.size * 0.55))
+        unknown_disp = _fa(unknown_word)
+        draw.text((x + pad, price_y), unknown_disp, font=unknown_font, fill=price_color)
+        price_h = unknown_font.size
 
-    # ===== پیل رنگیِ درصد تغییر =====
+    # ===== پیل رنگیِ درصد تغییر (با یه مثلث رسم‌شده، نه کاراکتر فلش) =====
     up = True
     chip_y = price_y + price_h + (14 if big else 8)
     if change is not None:
         try:
             change_val = float(change)
             up = change_val >= 0
-            arrow = "▲" if up else "▼"
             sign = "+" if up else ""
-            chg_text = f"{arrow} {sign}{change_val:.2f}%"
+            chg_text = f"{sign}{change_val:.2f}%"
             chg_color = (40, 150, 85) if up else (195, 60, 60)
-            cw = draw.textlength(chg_text, font=change_font) + 22
+            tri_w = 12
+            cw = draw.textlength(chg_text, font=change_font) + tri_w + 32
             ch = change_font.size + 16
             draw.rounded_rectangle([x + pad, chip_y, x + pad + cw, chip_y + ch], radius=ch / 2, fill=chg_color)
-            draw.text((x + pad + 11, chip_y + 8), chg_text, font=change_font, fill=(255, 255, 255))
+
+            # مثلثِ رو به بالا (سبز) یا رو به پایین (قرمز)، به‌جای کاراکتر ▲/▼
+            tri_cx = x + pad + 16
+            tri_cy = chip_y + ch / 2
+            if up:
+                tri = [(tri_cx, tri_cy - 6), (tri_cx - 6, tri_cy + 5), (tri_cx + 6, tri_cy + 5)]
+            else:
+                tri = [(tri_cx, tri_cy + 6), (tri_cx - 6, tri_cy - 5), (tri_cx + 6, tri_cy - 5)]
+            draw.polygon(tri, fill=(255, 255, 255))
+
+            draw.text((x + pad + tri_w + 20, chip_y + 8), chg_text, font=change_font, fill=(255, 255, 255))
             chip_y += ch
         except (TypeError, ValueError):
             pass
@@ -471,16 +493,16 @@ def render_single_card(symbol: str, price, change, lang: str = "fa", sparkline=N
     img = _load_background(width, height)
 
     name = _tr_name(symbol, lang)
-    title_text = f"{FLAG_EMOJI.get(symbol, '')} {name}"
+    title_text = name
     badge_text = TICKERS.get(symbol, symbol.upper())
     currency = _ui(lang, "currency")
-    price_text = f"{price:,} {currency}" if price is not None else _ui(lang, "unknown")
+    unknown = _ui(lang, "unknown")
 
     card_margin = 60
     img = _draw_price_card(
         img, card_margin, card_margin,
         width - 2 * card_margin, height - 2 * card_margin,
-        symbol, badge_text, title_text, price_text, change, sparkline=sparkline, big=True
+        symbol, badge_text, title_text, price, currency, unknown, change, sparkline=sparkline, big=True
     )
 
     draw = ImageDraw.Draw(img)
@@ -534,12 +556,12 @@ def render_grid_image(items: list, lang: str = "fa") -> Image.Image:
         y = top + r * (card_h + gap)
 
         name = _tr_name(symbol, lang)
-        title_text = f"{FLAG_EMOJI.get(symbol, '')} {name}"
+        title_text = name
         badge_text = TICKERS.get(symbol, symbol.upper())
         currency = _ui(lang, "currency")
-        price_text = f"{price:,} {currency}" if price is not None else _ui(lang, "unknown")
+        unknown = _ui(lang, "unknown")
 
-        img = _draw_price_card(img, x, y, card_w, card_h, symbol, badge_text, title_text, price_text, change, sparkline=sparkline)
+        img = _draw_price_card(img, x, y, card_w, card_h, symbol, badge_text, title_text, price, currency, unknown, change, sparkline=sparkline)
 
     return img
 
