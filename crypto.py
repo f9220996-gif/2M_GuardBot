@@ -19,11 +19,14 @@ tgju نمودار تاریخی نمی‌ده، کارتشون بدون نمود�
 اگه فایل assets/Poppins-Bold.ttf وجود داشته باشه، اعداد قیمت و درصد باهاش
 نوشته می‌شن؛ وگرنه از همون فونت پیش‌فرض استفاده می‌شه. متن فارسی همیشه
 با Vazirmatn نوشته می‌شه.
+
+نکته درباره‌ی استایل کارت‌ها:
+همه‌ی کارت‌ها (دلار، یورو، طلا، رمزارزها) از یک استایل یکسان استفاده می‌کنن:
+کارت تیره‌ی تینت‌شده با رنگ اختصاصی خودشون. هیچ کارتی پس‌زمینه‌ی پرچم نداره.
 """
 
 import io
 import os
-import math
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -89,16 +92,16 @@ FLAG_EMOJI = {
     "gold": "🥇",
 }
 
-# رنگ اختصاصیِ هر مورد - برای تینت‌کردن کارت‌های غیرِ پرچمی (طلا و رمزارزها)
+# رنگ اختصاصیِ هر مورد - همه‌ی کارت‌ها (رمزارز، طلا، دلار، یورو) با همین
+# رنگ‌ها تینت می‌شن؛ هیچ‌کدوم پس‌زمینه‌ی پرچم ندارن.
 COIN_COLORS = {
     "btc": (247, 147, 26),
     "usdt": (38, 161, 123),
     "bch": (139, 195, 74),
     "gold": (230, 175, 60),
+    "dollar": (76, 175, 120),
+    "euro": (90, 140, 230),
 }
-
-# این دوتا کارتشون «پرچم» می‌شه، نه تینت تیره
-FLAG_STYLE_SYMBOLS = {"dollar", "euro"}
 
 UI_STRINGS = {
     "fa": {
@@ -283,45 +286,6 @@ def _load_background(width, height, blur=3, darken=120):
     return bg
 
 
-# ---------------------------------------------------------------------------
-# پرچم‌های رسم‌شده با کد (نه عکس دانلودی) - فقط برای دلار و یورو
-# ---------------------------------------------------------------------------
-
-def _make_flag_image(kind, w, h):
-    w, h = max(1, int(w)), max(1, int(h))
-    img = Image.new("RGB", (w, h), (255, 255, 255))
-    draw = ImageDraw.Draw(img)
-
-    if kind == "dollar":
-        stripes = 13
-        stripe_h = h / stripes
-        for i in range(stripes):
-            color = (178, 34, 52) if i % 2 == 0 else (255, 255, 255)
-            draw.rectangle([0, i * stripe_h, w, (i + 1) * stripe_h], fill=color)
-        canton_w, canton_h = w * 0.4, h * 7 / 13
-        draw.rectangle([0, 0, canton_w, canton_h], fill=(60, 59, 110))
-        # چندتا نقطه‌ی ساده به‌جای ستاره‌های دقیق، فقط برای حس پرچم
-        rows, cols = 5, 6
-        for rr in range(rows):
-            for cc in range(cols):
-                sx = canton_w * (cc + 0.5) / cols
-                sy = canton_h * (rr + 0.5) / rows
-                r = min(canton_w, canton_h) * 0.035
-                draw.ellipse([sx - r, sy - r, sx + r, sy + r], fill=(255, 255, 255))
-
-    elif kind == "euro":
-        draw.rectangle([0, 0, w, h], fill=(0, 51, 153))
-        cx, cy = w / 2, h / 2
-        R = min(w, h) * 0.30
-        for i in range(12):
-            angle = math.radians(i * 30 - 90)
-            sx, sy = cx + R * math.cos(angle), cy + R * math.sin(angle)
-            r = min(w, h) * 0.032
-            draw.ellipse([sx - r, sy - r, sx + r, sy + r], fill=(255, 204, 0))
-
-    return img
-
-
 def _draw_sparkline(img: Image.Image, x0, y0, x1, y1, prices, up: bool):
     """یه نمودار ناحیه‌ای (area chart) ساده از لیست قیمت‌ها می‌کشه"""
     if not prices or len(prices) < 2:
@@ -352,49 +316,23 @@ def _draw_sparkline(img: Image.Image, x0, y0, x1, y1, prices, up: bool):
 def _draw_price_card(img, x, y, w, h, symbol, badge_text, title_text, price, currency_word, unknown_word,
                       change, sparkline=None, big=False):
     """
-    اگه symbol جزو FLAG_STYLE_SYMBOLS باشه (دلار/یورو): پس‌زمینه‌ی کارت
-    پرچمِ همون کشور می‌شه و یه کارت روشن داخلش برای متن می‌ذاریم (مثل نمونه).
-    وگرنه (طلا/رمزارزها): همون کارت تیره‌ی تینت‌شده‌ی قبلی.
+    کارت تیره‌ی تینت‌شده با رنگ اختصاصیِ خودِ symbol. این استایل برای همه‌ی
+    موارد یکسانه (رمزارزها، طلا، دلار، یورو) - هیچ کارتی پس‌زمینه‌ی پرچم نداره.
     """
-    is_flag = symbol in FLAG_STYLE_SYMBOLS
+    accent = _coin_color(symbol)
+    base = (14, 11, 24)
+    tinted = tuple(int(a * 0.22 + b * 0.78) for a, b in zip(accent, base))
 
-    if is_flag:
-        flag_img = _make_flag_image(symbol, w, h)
-        mask = Image.new("L", (int(w), int(h)), 0)
-        mdraw = ImageDraw.Draw(mask)
-        mdraw.rounded_rectangle([0, 0, int(w) - 1, int(h) - 1], radius=26, fill=255)
-        img = img.copy()
-        img.paste(flag_img, (int(x), int(y)), mask)
+    card_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    cdraw = ImageDraw.Draw(card_layer)
+    cdraw.rounded_rectangle([x, y, x + w, y + h], radius=26, fill=(*tinted, 235))
+    cdraw.rounded_rectangle([x, y, x + w, y + h], radius=26, outline=(*accent, 160), width=2)
+    img = Image.alpha_composite(img.convert("RGBA"), card_layer).convert("RGB")
 
-        inner_pad = 22
-        ix0, iy0 = x + inner_pad, y + inner_pad
-        ix1, iy1 = x + w - inner_pad, y + h - inner_pad
-
-        light_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        ldraw = ImageDraw.Draw(light_layer)
-        ldraw.rounded_rectangle([ix0, iy0, ix1, iy1], radius=20, fill=(250, 250, 252, 240))
-        img = Image.alpha_composite(img.convert("RGBA"), light_layer).convert("RGB")
-
-        x, y, w, h = ix0, iy0, ix1 - ix0, iy1 - iy0
-        title_color = (30, 30, 40)
-        price_color = (20, 20, 30)
-        badge_bg = (235, 235, 240, 255)
-        badge_fg = (60, 60, 70)
-    else:
-        accent = _coin_color(symbol)
-        base = (14, 11, 24)
-        tinted = tuple(int(a * 0.22 + b * 0.78) for a, b in zip(accent, base))
-
-        card_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        cdraw = ImageDraw.Draw(card_layer)
-        cdraw.rounded_rectangle([x, y, x + w, y + h], radius=26, fill=(*tinted, 235))
-        cdraw.rounded_rectangle([x, y, x + w, y + h], radius=26, outline=(*accent, 160), width=2)
-        img = Image.alpha_composite(img.convert("RGBA"), card_layer).convert("RGB")
-
-        title_color = (255, 255, 255)
-        price_color = (255, 215, 110)
-        badge_bg = (255, 255, 255, 28)
-        badge_fg = (235, 230, 245)
+    title_color = (255, 255, 255)
+    price_color = (255, 215, 110)
+    badge_bg = (255, 255, 255, 28)
+    badge_fg = (235, 230, 245)
 
     draw = ImageDraw.Draw(img)
     pad = 24 if big else 18
