@@ -1,394 +1,557 @@
 # -*- coding: utf-8 -*-
 """
-دستورهای «دلار»، «طلا» و «تتر»: قیمت لحظه‌ای هرکدوم، جدا از هم، به‌صورت عکس.
-هر عضو اسم یکی از این‌ها رو می‌نویسه و فقط قیمت همون یکی رو می‌بینه.
-هیچ جدول/گرید ترکیبی‌ای وجود نداره - هر سه کاملاً مستقل از هم کار می‌کنن.
-
-نکته‌ی مهم درباره‌ی منبع داده:
-قبلاً قیمت رمزارزها از API نوبیتکس گرفته می‌شد، ولی چون نوبیتکس اخیراً هدف
-تحریم‌های مستقیم آمریکا قرار گرفته، سرورهای میزبانی خارج از ایران (مثل
-Railway) دیگه نمی‌تونن بهش وصل بشن. برای همین قیمت تتر از CoinGecko
-(بین‌المللی، رایگان، بدون محدودیت جغرافیایی) گرفته می‌شه. دلار و طلا
-مستقیماً از tgju میان.
+فایل اصلی اجرای ربات مدیریت گروه.
+اجرا: python main.py
 """
 
-import io
-import os
-import requests
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import logging
 
-from telegram import Update
-from telegram.ext import ContextTypes
+from telegram import Update, ChatMemberUpdated
+from telegram.ext import (
+    Application, ApplicationBuilder, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ChatMemberHandler, ContextTypes, filters,
+    ApplicationHandlerStop, TypeHandler
+)
 
-import arabic_reshaper
-from bidi.algorithm import get_display
+import database as db
+from config import BOT_TOKEN, CREATOR_ID
 
-COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
-TGJU_URL = "https://call4.tgju.org/ajax.json"
+from start import (
+    cmd_start, on_help_button, send_start_panel, restart_bot,
+    ai_model_select, ai_use_gemini, ai_use_chatgpt
+)
+from moderation import (
+    cmd_khamoshi, cmd_roshan, cmd_sokoot, cmd_azad_kon, cmd_ban_kon, cmd_akhtar,
+    cmd_pak, cmd_gif_ban, cmd_sticker_ban, check_blacklisted_media, check_media_permissions
+)
+from bad_words_filter import check_message_for_bad_words
+from games import (
+    cmd_tas, cmd_shir_khat, cmd_sang_kaghaz_gheychi,
+    rps_pick
+)
+from panel import (
+    show_my_groups, open_group_panel, toggle_lock, toggle_active,
+    show_banned_list, show_muted_list, show_warned_list,
+    show_mute_detail, release_mute_from_panel, ask_edit_mute_duration, set_mute_duration_from_panel,
+    show_features_panel, toggle_feature, show_reports_list, clear_reports_cb,
+    open_report_detail, handle_report_action,
+    open_bad_words_panel, ask_add_bad_word, receive_bad_word_text, delete_bad_word_cb
+)
+from creator import (
+    open_creator_panel, toggle_global, ask_set_shutdown_text, receive_shutdown_text,
+    ask_set_update_msg, receive_update_msg, show_update_msg
+)
+from reports import cmd_gozaresh, send_pending_reports_job
+from persian_date import cmd_tarikh
+from crypto import cmd_crypto_single, SYMBOL_MAP, FIAT_GOLD_MAP
+from welcome import (
+    on_new_member_welcome, open_welcome_panel, toggle_welcome,
+    preview_welcome, reset_welcome, ask_edit_welcome, receive_welcome_text,
+    ask_add_welcome_media, receive_welcome_media, clear_welcome_media_cb
+)
+from warnings_editor import (
+    open_warnedit_panel, open_level_panel, ask_warn_text, receive_warn_text,
+    ask_warn_media, receive_warn_media, reset_warn
+)
+from translate_feature import (
+    cmd_tarjome, check_dot_translate, open_translate_panel, set_translate_lang_cb,
+    ask_set_translate_trigger, receive_translate_trigger
+)
+from cleanup import (
+    open_cleanup_panel, toggle_cleanup, 
+    track_last_message, run_auto_cleanup_job, ask_interval, adjust_interval, run_cleanup_now,
+    adjust_count, set_cleanup_count
+)
+from nav import track_nav_state, handle_back_step
+from image_lang import open_image_lang_panel, set_image_lang_cb
 
-USER_AGENT = "Mozilla/5.0 (compatible; TelegramBot/1.0; +https://core.telegram.org/bots)"
+# ===== هوش مصنوعی =====
+from ai_simple import (
+    ai_handler, ai_private_chat,
+    open_ai_trigger_panel, ask_set_ai_trigger, receive_ai_trigger
+)
 
-# دلار و طلا رمزارز نیستن، برای همین از یه منبع عمومی دیگه (tgju) میان
-FIAT_GOLD_MAP = {
-    "دلار": ("price_dollar_rl", "💵", "dollar"),
-    "طلا": ("geram18", "🥇", "gold"),
+# ===== پشتیبانی =====
+from support import (
+    support_menu, receive_support_message, confirm_support, cancel_support,
+    support_admin_panel, show_support_message, support_reply, send_support_reply, support_delete
+)
+
+# ===== تگ =====
+from tag_all import tag_all_members, tag_close, track_seen_user
+
+# ===== میان‌برهای قابل‌تغییر دستورات =====
+from command_shortcuts import (
+    get_group_command_keywords, open_shortcuts_panel, ask_edit_command_alias,
+    receive_command_alias, reset_command_alias_cb, reset_all_command_aliases_cb,
+    cmd_group_help
+)
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+
+PERSIAN_COMMANDS = {
+    "خاموشی": cmd_khamoshi,
+    "روشن": cmd_roshan,
+    "سکوت": cmd_sokoot,
+    "آزاد کن": cmd_azad_kon,
+    "بن کن": cmd_ban_kon,
+    "اخطار": cmd_akhtar,
+    "پاک": cmd_pak,
+    "گیف بن": cmd_gif_ban,
+    "استیکر بن": cmd_sticker_ban,
+    "تاس": cmd_tas,
+    "شیر یا خط": cmd_shir_khat,
+    "سنگ کاغذ قیچی": cmd_sang_kaghaz_gheychi,
+    "گزارش": cmd_gozaresh,
+    "ترجمه": cmd_tarjome,
+    "تاریخ": cmd_tarikh,
 }
 
-# اسم فارسی -> (نماد کوتاه, ایموجی) — فقط تتر
-SYMBOL_MAP = {
-    "تتر": ("usdt", "💵"),
-}
+PRICE_LOOKUP_NAMES = set(SYMBOL_MAP.keys()) | set(FIAT_GOLD_MAP.keys())
+GAME_COMMANDS = {"تاس", "شیر یا خط", "سنگ کاغذ قیچی"}
 
-# نماد کوتاه -> آیدیِ همون کوین تو CoinGecko
-COINGECKO_IDS = {
-    "usdt": "tether",
-}
 
-# ترجمه اسم هر مورد به زبان‌های دیگه (برای نمایش داخل عکس)
-NAME_TRANSLATIONS = {
-    "usdt": {"fa": "تتر", "en": "Tether", "ar": "تيثر"},
-    "dollar": {"fa": "دلار", "en": "US Dollar", "ar": "الدولار الأمريكي"},
-    "gold": {"fa": "طلا (۱۸ عیار)", "en": "Gold (18k)", "ar": "الذهب (18 قيراط)"},
-}
-
-UI_STRINGS = {
-    "fa": {
-        "greeting": "سلام جوان ایرانی", "price_label": "قیمت لحظه‌ای", "currency": "تومان",
-        "change_suffix": "تغییر نسبت به دیروز", "updated": "بروزرسانی", "unknown": "نامشخص",
-    },
-    "en": {
-        "greeting": "Hello Iranian Youth", "price_label": "Live Price", "currency": "Toman",
-        "change_suffix": "change vs yesterday", "updated": "Updated", "unknown": "N/A",
-    },
-    "ar": {
-        "greeting": "مرحباً أيها الشاب الإيراني", "price_label": "السعر اللحظي", "currency": "تومان",
-        "change_suffix": "التغيير مقارنة بالأمس", "updated": "آخر تحديث", "unknown": "غير معروف",
-    },
-}
-
-LANG_NAMES = {"fa": "فارسی", "en": "English", "ar": "العربية"}
-
-
-def _tr_name(symbol, lang):
-    entry = NAME_TRANSLATIONS.get(symbol)
-    if not entry:
-        return symbol
-    return entry.get(lang, entry.get("fa", symbol))
-
-
-def _ui(lang, key):
-    return UI_STRINGS.get(lang, UI_STRINGS["fa"]).get(key, UI_STRINGS["fa"][key])
-
-FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "Vazirmatn-Bold.ttf")
-FALLBACK_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "DejaVuSans-Bold.ttf")
-
-
-def _get_font(size):
-    if os.path.exists(FONT_PATH):
-        return ImageFont.truetype(FONT_PATH, size)
-    if os.path.exists(FALLBACK_FONT_PATH):
-        return ImageFont.truetype(FALLBACK_FONT_PATH, size)
-    return ImageFont.load_default()
-
-
-def _fa(text: str) -> str:
-    """متن فارسی رو برای نمایش درست (حروف چسبیده + جهت راست‌به‌چپ) روی عکس آماده می‌کنه"""
-    reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped)
-
-
-# ---------------------------------------------------------------------------
-# دریافت داده: CoinGecko برای تتر، tgju برای نرخ دلار/طلا
-# ---------------------------------------------------------------------------
-
-def fetch_coingecko_data():
-    """قیمت دلاریِ تتر رو از CoinGecko می‌گیره"""
-    ids = ",".join(sorted(set(COINGECKO_IDS.values())))
-    params = {
-        "ids": ids,
-        "vs_currencies": "usd",
-        "include_24hr_change": "true",
-    }
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(COINGECKO_URL, params=params, headers=headers, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def get_price_toman(cg_data: dict, symbol: str, usd_to_toman):
-    """
-    قیمت یک رمزارز به تومان + درصد تغییر ۲۴ ساعته رو برمی‌گردونه.
-    usd_to_toman: نرخ لحظه‌ایِ هر دلار به تومان (از tgju)
-    """
-    cg_id = COINGECKO_IDS.get(symbol)
-    if not cg_id:
-        return None, None
-    entry = cg_data.get(cg_id)
-    if not entry:
-        return None, None
-    usd_price = entry.get("usd")
-    change = entry.get("usd_24h_change")
-    if usd_price is None or usd_to_toman is None:
-        return None, change
-    try:
-        price_toman = int(float(usd_price) * float(usd_to_toman))
-    except (TypeError, ValueError):
-        return None, change
-    return price_toman, change
-
-
-def fetch_tgju_data():
-    resp = requests.get(TGJU_URL, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("current", {})
-
-
-def get_fiat_gold_price(tgju_data: dict, key: str):
-    """قیمت دلار/طلا به تومان + درصد تغییر رو برمی‌گردونه، یا None اگه پیدا نشد"""
-    entry = tgju_data.get(key)
-    if not entry:
-        return None, None
-    try:
-        price_str = str(entry.get("p", "")).replace(",", "")
-        price_rial = float(price_str)
-        price_toman = int(price_rial / 10)
-    except (TypeError, ValueError):
-        return None, None
-    change = entry.get("dp") or entry.get("d")
-    try:
-        change = float(str(change).replace("%", "")) if change is not None else None
-    except (TypeError, ValueError):
-        change = None
-    return price_toman, change
-
-
-def get_usd_to_toman_rate(tgju_data: dict):
-    """نرخ لحظه‌ایِ هر دلار به تومان (برای تبدیل قیمت دلاریِ تتر)"""
-    rate, _ = get_fiat_gold_price(tgju_data, "price_dollar_rl")
-    return rate
-
-
-def _card_color(day_change):
-    try:
-        if day_change is not None and float(day_change) < 0:
-            return (255, 90, 90)  # قرمز برای منفی
-    except (TypeError, ValueError):
-        pass
-    return (90, 200, 130)  # سبز برای مثبت یا نامشخص
-
-
-COIN_COLORS = {
-    "usdt": (38, 161, 123),
-    "dollar": (90, 160, 230),
-    "gold": (222, 180, 90),
-}
-
-
-def _coin_color(symbol):
-    return COIN_COLORS.get(symbol, (147, 51, 234))
-
-
-def _vertical_gradient(width, height, top_color, bottom_color):
-    img = Image.new("RGB", (width, height), top_color)
-    draw = ImageDraw.Draw(img)
-    for y in range(height):
-        t = y / height
-        r = int(top_color[0] + (bottom_color[0] - top_color[0]) * t)
-        g = int(top_color[1] + (bottom_color[1] - top_color[1]) * t)
-        b = int(top_color[2] + (bottom_color[2] - top_color[2]) * t)
-        draw.line([(0, y), (width, y)], fill=(r, g, b))
-    return img
-
-
-BG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.jpg")
-
-
-def _load_background(width, height):
-    """پس‌زمینه واقعی رو می‌گیره، برش می‌زنه که کامل قاب رو پر کنه، و کمی تیره‌ترش می‌کنه"""
-    if not os.path.exists(BG_IMAGE_PATH):
-        return _vertical_gradient(width, height, (18, 10, 34), (6, 4, 14))
-
-    bg = Image.open(BG_IMAGE_PATH).convert("RGB")
-    src_w, src_h = bg.size
-    target_ratio = width / height
-    src_ratio = src_w / src_h
-    if src_ratio > target_ratio:
-        new_w = int(src_h * target_ratio)
-        left = (src_w - new_w) // 2
-        bg = bg.crop((left, 0, left + new_w, src_h))
-    else:
-        new_h = int(src_w / target_ratio)
-        top = (src_h - new_h) // 3  # کمی از بالا برش بخوره که کوین‌ها بمونن
-        bg = bg.crop((0, top, src_w, top + new_h))
-    bg = bg.resize((width, height), Image.LANCZOS)
-
-    # یه لایه تیره‌ی نیمه‌شفاف رو کل عکس، که متن روش خواناتر بشه
-    overlay = Image.new("RGBA", (width, height), (8, 4, 18, 110))
-    bg = Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
-    return bg
-
-
-def _glass_panel(img, x0, y0, x1, y1, radius=32, blur=14, white_mix=0.06):
-    """
-    افکت شیشه‌ی مات واقعی (مثل پنل‌های iOS): همون قسمت از پس‌زمینه رو
-    بلور می‌کنه، یه‌کم سفید باهاش قاطی می‌کنه (حس شیشه‌ی مه‌گرفته)،
-    و با یه ماسک گردشده جاش می‌ذاره. بدون خط دور، بدون کادر اضافه.
-    """
-    x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
-    region = img.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(blur))
-    white_layer = Image.new("RGB", region.size, (255, 255, 255))
-    region = Image.blend(region, white_layer, white_mix)
-
-    mask = Image.new("L", region.size, 0)
-    mdraw = ImageDraw.Draw(mask)
-    mdraw.rounded_rectangle([0, 0, region.size[0] - 1, region.size[1] - 1], radius=radius, fill=255)
-
-    img = img.copy()
-    img.paste(region, (x0, y0), mask)
-    return img
-
-
-def render_single_card(symbol: str, price, change, lang: str = "fa", extra_info=None) -> Image.Image:
-    width, height = 1200, 675  # نسبت دقیق 16:9
-    gold = (235, 180, 90)  # طلایی/کهربایی هماهنگ با پس‌زمینه
-    name = _tr_name(symbol, lang)
-
-    img = _load_background(width, height)
-
-    # پنل شیشه‌ای مات (بدون خط دور، بدون گوشه‌های تزئینی)
-    panel_margin = 70
-    img = _glass_panel(img, panel_margin, panel_margin, width - panel_margin, height - panel_margin)
-    draw = ImageDraw.Draw(img)
-
-    greeting_font = _get_font(24)
-    name_font = _get_font(54)
-    price_label_font = _get_font(24)
-    price_font = _get_font(72)
-    change_font = _get_font(30)
-    footer_font = _get_font(20)
-    detail_font = _get_font(22)
-
-    greeting_text = _fa(_ui(lang, "greeting"))
-    gw = draw.textlength(greeting_text, font=greeting_font)
-    draw.text(((width - gw) / 2, 118), greeting_text, font=greeting_font, fill=(235, 225, 210))
-
-    name_text = _fa(name)
-    nw = draw.textlength(name_text, font=name_font)
-    draw.text(((width - nw) / 2, 168), name_text, font=name_font, fill=(255, 255, 255))
-
-    price_label = _fa(_ui(lang, "price_label"))
-    plw = draw.textlength(price_label, font=price_label_font)
-    draw.text(((width - plw) / 2, 272), price_label, font=price_label_font, fill=(225, 210, 190))
-
-    currency = _ui(lang, "currency")
-    price_text = _fa(f"{price:,} {currency}") if price is not None else _fa(_ui(lang, "unknown"))
-    pw = draw.textlength(price_text, font=price_font)
-    draw.text(((width - pw) / 2, 306), price_text, font=price_font, fill=gold)
-
-    y_cursor = 400
-    color = _card_color(change)
-    if change is not None:
-        try:
-            change_val = float(change)
-            sign = "+" if change_val >= 0 else ""
-            change_text = _fa(f"{sign}{change_val:.2f}٪ {_ui(lang, 'change_suffix')}")
-            cw = draw.textlength(change_text, font=change_font)
-            draw.text(((width - cw) / 2, y_cursor), change_text, font=change_font, fill=color)
-            y_cursor += 48
-        except (TypeError, ValueError):
-            pass
-
-    if extra_info:
-        for line in extra_info:
-            line_text = _fa(line)
-            lw = draw.textlength(line_text, font=detail_font)
-            draw.text(((width - lw) / 2, y_cursor), line_text, font=detail_font, fill=(210, 205, 220))
-            y_cursor += 34
-
-    from persian_date import format_persian_datetime
-    footer_text = _fa(f"{_ui(lang, 'updated')}: {format_persian_datetime()}")
-    fw = draw.textlength(footer_text, font=footer_font)
-    draw.text(((width - fw) / 2, height - panel_margin - 44), footer_text, font=footer_font, fill=(220, 205, 180))
-
-    return img
-
-
-def _image_to_bytes(img: Image.Image) -> io.BytesIO:
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    buf.name = "price.png"
-    return buf
-
-
-
-def _build_caption(symbol, price, change, lang="fa"):
-    name = _tr_name(symbol, lang)
-    currency = _ui(lang, "currency")
-    if price is None:
-        price_str = _ui(lang, "unknown")
-    else:
-        price_str = f"{price:,} {currency}"
-
-    if lang == "en":
-        text = f"{name} today: {price_str}"
-    elif lang == "ar":
-        text = f"{name} اليوم: {price_str}"
-    else:
-        text = f"{name} امروز {price_str}"
-
-    if change is not None:
-        try:
-            change_val = float(change)
-            sign = "+" if change_val >= 0 else ""
-            text += f" ({sign}{change_val:.2f}٪)"
-        except (TypeError, ValueError):
-            pass
-    return text
-
-
-async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import database as db
-    text = (update.effective_message.text or "").strip()
+async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
     chat = update.effective_chat
-    lang = db.get_image_lang(chat.id) if chat and chat.type in ("group", "supergroup") else "fa"
+    if not message or not chat or chat.type not in ("group", "supergroup"):
+        return
 
-    if text in FIAT_GOLD_MAP:
-        key, emoji, trans_key = FIAT_GOLD_MAP[text]
-        try:
-            tgju_data = fetch_tgju_data()
-        except Exception as e:
-            await update.effective_message.reply_text(f"❌ نتونستم قیمت {text} رو بگیرم.\n{e}")
+    text = (message.text or "").strip()
+
+    if text == "راهنما":
+        await cmd_group_help(update, context)
+        return
+
+    # نگاشت کلمه‌ی فعلی (سفارشی یا پیش‌فرض) -> کلید اصلی، مخصوص همین گروه
+    keyword_map = get_group_command_keywords(chat.id)
+    sorted_keywords = sorted(keyword_map.keys(), key=len, reverse=True)
+    for kw in sorted_keywords:
+        if not kw:
+            continue
+        if text == kw or text.startswith(kw + " "):
+            original_key = keyword_map[kw]
+            if original_key in GAME_COMMANDS and not db.is_feature_enabled(chat.id, "games"):
+                return
+            rest = text[len(kw):].strip()
+            context.args = rest.split() if rest else []
+            await PERSIAN_COMMANDS[original_key](update, context)
             return
-        price, change = get_fiat_gold_price(tgju_data, key)
-        img = render_single_card(trans_key, price, change, lang=lang)
-        caption = _build_caption(trans_key, price, change, lang=lang)
-        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+
+    if text in PRICE_LOOKUP_NAMES:
+        if text == "دلار" and not db.is_feature_enabled(chat.id, "dollar"):
+            return
+        await cmd_crypto_single(update, context)
         return
 
-    match = SYMBOL_MAP.get(text)
-    if not match:
+    consumed = await check_dot_translate(update, context)
+    if consumed:
         return
-    symbol, emoji = match
 
+    if db.is_feature_enabled(chat.id, "bad_words"):
+        await check_message_for_bad_words(update, context)
+
+
+async def _build_join_message(bot, chat):
+    """پیام کامل هنگام نصب ربات تو یه گروه: مالک گروه، لیست ادمین‌ها، وضعیت ادمین بودن ربات، و وضعیت قابلیت‌ها"""
     try:
+        admins = await bot.get_chat_administrators(chat.id)
+    except Exception:
+        admins = []
+
+    me = await bot.get_me()
+
+    owner = next((a.user for a in admins if a.status == "creator"), None)
+    if owner:
+        owner_name = f"@{owner.username}" if owner.username else owner.full_name
+    else:
+        owner_name = "نامشخص"
+
+    other_admins = [
+        a.user for a in admins
+        if a.status == "administrator" and not a.user.is_bot
+    ]
+    admin_names = [f"• {f'@{u.username}' if u.username else u.full_name}" for u in other_admins]
+
+    bot_member = next((a for a in admins if a.user.id == me.id), None)
+    is_full_admin = bool(
+        bot_member
+        and bot_member.status == "administrator"
+        and getattr(bot_member, "can_delete_messages", False)
+        and getattr(bot_member, "can_restrict_members", False)
+    )
+
+    lines = [
+        "📗 ربات با موفقیت در این گروه نصب شد.",
+        "",
+        "➕ مالک گروه:",
+        f"▸ {owner_name}",
+        "",
+    ]
+
+    if admin_names:
+        lines.append("👮 ادمین‌های گروه:")
+        lines.extend(admin_names)
+        lines.append("")
+
+    if is_full_admin:
+        lines.append("✔ ربات ادمین کامل این گروه است.")
+    else:
+        lines.append(
+            "⚠️ ربات هنوز ادمین کامل نیست.\n"
+            "برای فعال شدن همه‌ی قابلیت‌ها، لطفاً از تنظیمات گروه، دسترسی «حذف پیام» و «محدود کردن اعضا» رو به ربات بده."
+        )
+    lines.append("")
+
+    lines.append("🛠 وضعیت پیش‌فرض قابلیت‌ها:")
+    lines.append("")
+    for key, label in db.TOGGLEABLE_FEATURES.items():
+        enabled = db.is_feature_enabled(chat.id, key)
+        lines.append(f"{'✔' if enabled else '✘'} {label}")
+    lines.append("")
+
+    lines.append("📚 برای مدیریت کامل این گروه (تنظیمات، اخطارها، پاک‌سازی خودکار و موارد دیگر)، به پی‌وی ربات مراجعه کن و از پنل مدیریت استفاده کن.")
+
+    return "\n".join(lines)
+
+
+async def on_new_chat_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message or not message.new_chat_members:
+        return
+    me = await context.bot.get_me()
+    if me.id not in [m.id for m in message.new_chat_members]:
+        return
+    chat = update.effective_chat
+    adder = message.from_user
+    db.upsert_group(
+        chat.id, chat.title,
+        added_by_user_id=adder.id if adder else None,
+        added_by_username=(f"@{adder.username}" if adder and adder.username else (adder.full_name if adder else None))
+    )
+    # نکته: پیام خوش‌آمد نصب اینجا فرستاده نمی‌شه، چون این رویداد معمولاً
+    # همزمان با my_chat_member (در on_bot_added_to_group) هم فایر می‌شه؛
+    # برای جلوگیری از فرستادن پیام تکراری، فقط اونجا فرستاده می‌شه.
+
+
+async def on_bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result: ChatMemberUpdated = update.my_chat_member
+    if not result:
+        return
+    old_status = result.old_chat_member.status
+    new_status = result.new_chat_member.status
+    chat = result.chat
+    if chat.type not in ("group", "supergroup"):
+        return
+    # فقط وقتی واقعاً "تازه اضافه شده" (نه هر ارتقا/تنزل رتبه‌ای که وضعیتش بازم member/administrator بمونه)
+    just_joined = old_status in ("left", "kicked") and new_status in ("member", "administrator")
+    if new_status in ("member", "administrator"):
+        adder = result.from_user
+        db.upsert_group(
+            chat.id, chat.title,
+            added_by_user_id=adder.id if adder else None,
+            added_by_username=(f"@{adder.username}" if adder and adder.username else (adder.full_name if adder else None))
+        )
+        if just_joined:
+            try:
+                text = await _build_join_message(context.bot, chat)
+                await context.bot.send_message(chat.id, text)
+            except Exception:
+                pass
+
+
+async def on_start_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from start import build_start_keyboard, START_TEXT
+    query = update.callback_query
+    await query.answer()
+    bot_username = (await context.bot.get_me()).username
+    await query.edit_message_text(
+        START_TEXT,
+        reply_markup=build_start_keyboard(update.effective_user.id, bot_username)
+    )
+
+
+# ===== گیت خاموشی سراسری =====
+async def global_shutdown_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if db.is_global_active():
+        return
+    
+    user = update.effective_user
+    if user and user.id == CREATOR_ID:
+        return
+    
+    chat = update.effective_chat
+    if chat and chat.type == "private":
         try:
-            tgju_data = fetch_tgju_data()
-            usd_toman = get_usd_to_toman_rate(tgju_data)
-        except Exception as e:
-            await update.effective_message.reply_text(f"❌ نتونستم نرخ دلار رو بگیرم (لازم برای تبدیل قیمت به تومان).\n{e}")
+            await update.effective_message.reply_text(db.get_shutdown_message())
+        except Exception:
+            pass
+    
+    raise ApplicationHandlerStop
+
+
+def main():
+    if not BOT_TOKEN or BOT_TOKEN == "PUT_YOUR_BOT_TOKEN_HERE":
+        raise SystemExit("✘ لطفاً اول BOT_TOKEN رو در config.py یا متغیر محیطی ست کنید.")
+    if not CREATOR_ID:
+        logger.warning("⚠️ CREATOR_ID تنظیم نشده — پنل ویژه سازنده کار نخواهد کرد.")
+
+    db.init_db()
+    app: Application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .write_timeout(30)
+        .build()
+    )
+
+    async def guarded_group_text(update, context):
+        if not db.is_global_active() and update.effective_user.id != CREATOR_ID:
+            return
+        await on_group_text(update, context)
+
+    async def guarded_private_text(update, context):
+        chat = update.effective_chat
+        user = update.effective_user
+        
+        if not db.is_global_active() and user.id != CREATOR_ID:
+            if chat.type == "private":
+                await update.effective_message.reply_text(db.get_shutdown_message())
+            return
+        
+        consumed = await receive_shutdown_text(update, context)
+        if consumed:
+            return
+        consumed = await receive_update_msg(update, context)
+        if consumed:
+            return
+        consumed = await receive_welcome_text(update, context)
+        if consumed:
+            return
+        consumed = await receive_warn_text(update, context)
+        if consumed:
+            return
+        consumed = await receive_bad_word_text(update, context)
+        if consumed:
+            return
+        consumed = await receive_translate_trigger(update, context)
+        if consumed:
+            return
+        consumed = await receive_ai_trigger(update, context)
+        if consumed:
+            return
+        consumed = await receive_command_alias(update, context)
+        if consumed:
+            return
+        consumed = await receive_support_message(update, context)
+        if consumed:
+            return
+        consumed = await send_support_reply(update, context)
+        if consumed:
+            return
+        
+        text = (update.effective_message.text or "").strip()
+        if text in PRICE_LOOKUP_NAMES:
+            await cmd_crypto_single(update, context)
             return
 
-        try:
-            cg_data = fetch_coingecko_data()
-        except Exception as e:
-            await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
+        # فقط اگه کاربر صراحتاً یه مدل هوش مصنوعی رو انتخاب کرده باشه، پیامش به AI می‌ره
+        if context.user_data.get("ai_chat_enabled"):
+            await ai_private_chat(update, context)
             return
 
-        price, change = get_price_toman(cg_data, symbol, usd_toman)
-        img = render_single_card(symbol, price, change, lang=lang)
-        caption = _build_caption(symbol, price, change, lang=lang)
-        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
-    except Exception as e:
-        await update.effective_message.reply_text(f"❌ خطای غیرمنتظره تو ساختن قیمت {text}.\n{e}")
+        # هیچ‌کدوم از قابلیت‌های ربات مرتبط نبود -> پیام رو سریع پاک کن
+        try:
+            await update.effective_message.delete()
+        except Exception:
+            pass
+
+    # ===== گیت خاموشی =====
+    app.add_handler(TypeHandler(Update, global_shutdown_gate), group=-1)
+    app.add_handler(CallbackQueryHandler(track_nav_state), group=-1)
+
+    # ===== هوش مصنوعی =====
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+        ai_handler
+    ), group=0)
+
+    # ===== دستورات =====
+    app.add_handler(CommandHandler("start", cmd_start))
+
+    # ===== پی‌وی =====
+    # دکمه‌ی ثابت «صفحه قبل» باید قبل از هندلر عمومی متن پی‌وی چک بشه، وگرنه
+    # به‌جای برگشتن یه قدم، به هوش مصنوعی فرستاده می‌شه
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.Regex("^◀️ صفحه قبل$"), handle_back_step
+    ))
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, guarded_private_text
+    ))
+
+    async def private_media_router(update, context):
+        consumed = await receive_welcome_media(update, context)
+        if consumed:
+            return
+        consumed = await receive_warn_media(update, context)
+        if consumed:
+            return
+        consumed = await receive_support_message(update, context)
+        if consumed:
+            return
+        # هیچ حالت "منتظر مدیا"ای فعال نبود -> پیام رو سریع پاک کن
+        try:
+            await update.effective_message.delete()
+        except Exception:
+            pass
+
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & (filters.Sticker.ALL | filters.ANIMATION | filters.PHOTO),
+        private_media_router
+    ))
+
+    # ===== پیام‌های گروه =====
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, guarded_group_text
+    ), group=2)
+
+    # ===== تگ =====
+    # نکته مهم: این دو handler عمداً تو گروه‌های شماره‌ی جداگانه (6 و 7) ثبت شدن،
+    # نه گروه 0 (جایی که ai_handler هست). چون تو python-telegram-bot، وقتی چند
+    # handler تو یه گروه شماره‌ای باشن، فقط اولی که مچ بشه اجرا می‌شه و بقیه‌ی
+    # همون گروه اصلاً چک نمی‌شن. قبلاً چون تگ تو همون گروه 0 بود، ai_handler
+    # (که زودتر ثبت شده و روی همه‌ی پیام‌های متنی گروه مچ می‌شه) جلوی اجرای
+    # تگ رو می‌گرفت. با گروه شماره‌ی مجزا، این دو مستقل از بقیه همیشه چک می‌شن.
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, track_seen_user
+    ), group=6)
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, tag_all_members
+    ), group=7)
+    app.add_handler(CallbackQueryHandler(tag_close, pattern="^tag_close:"))
+    app.add_handler(CallbackQueryHandler(rps_pick, pattern="^rps_pick:"))
+
+    # ===== چک لیست سیاه =====
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & (filters.ANIMATION | filters.Sticker.ALL),
+        check_blacklisted_media
+    ))
+
+    # ===== چک ارسال مدیا =====
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & (
+            filters.PHOTO | filters.VIDEO | filters.Document.ALL |
+            filters.ANIMATION | filters.Sticker.ALL
+        ),
+        check_media_permissions
+    ), group=3)
+
+    # ===== عضویت در گروه =====
+    app.add_handler(ChatMemberHandler(on_bot_added_to_group, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_chat_members))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_member_welcome), group=4)
+
+    # ===== دکمه‌های شیشه‌ای =====
+    app.add_handler(CallbackQueryHandler(on_help_button, pattern="^help_commands$"))
+    app.add_handler(CallbackQueryHandler(on_start_menu_button, pattern="^start_menu$"))
+    app.add_handler(CallbackQueryHandler(show_my_groups, pattern="^panel_my_groups$"))
+    app.add_handler(CallbackQueryHandler(open_group_panel, pattern=r"^grp_open:"))
+    app.add_handler(CallbackQueryHandler(toggle_lock, pattern=r"^grp_(lock|unlock):"))
+    app.add_handler(CallbackQueryHandler(toggle_active, pattern=r"^grp_active_(on|off):"))
+    app.add_handler(CallbackQueryHandler(show_banned_list, pattern=r"^grp_banned:"))
+    app.add_handler(CallbackQueryHandler(show_muted_list, pattern=r"^grp_muted:"))
+    app.add_handler(CallbackQueryHandler(show_mute_detail, pattern=r"^mute_user:"))
+    app.add_handler(CallbackQueryHandler(release_mute_from_panel, pattern=r"^mute_release:"))
+    app.add_handler(CallbackQueryHandler(ask_edit_mute_duration, pattern=r"^mute_edit:"))
+    app.add_handler(CallbackQueryHandler(set_mute_duration_from_panel, pattern=r"^mute_setdur:"))
+    app.add_handler(CallbackQueryHandler(show_features_panel, pattern=r"^grp_features:"))
+    app.add_handler(CallbackQueryHandler(toggle_feature, pattern=r"^feat_toggle:"))
+    app.add_handler(CallbackQueryHandler(open_welcome_panel, pattern=r"^wc_panel:"))
+    app.add_handler(CallbackQueryHandler(toggle_welcome, pattern=r"^wc_(on|off):"))
+    app.add_handler(CallbackQueryHandler(ask_edit_welcome, pattern=r"^wc_edit:"))
+    app.add_handler(CallbackQueryHandler(preview_welcome, pattern=r"^wc_preview:"))
+    app.add_handler(CallbackQueryHandler(reset_welcome, pattern=r"^wc_reset:"))
+    app.add_handler(CallbackQueryHandler(show_reports_list, pattern=r"^grp_reports:"))
+    app.add_handler(CallbackQueryHandler(clear_reports_cb, pattern=r"^reports_clear:"))
+    app.add_handler(CallbackQueryHandler(open_report_detail, pattern=r"^report_open:"))
+    app.add_handler(CallbackQueryHandler(handle_report_action, pattern=r"^report_act:"))
+    app.add_handler(CallbackQueryHandler(open_warnedit_panel, pattern=r"^warnedit_panel:"))
+    app.add_handler(CallbackQueryHandler(open_level_panel, pattern=r"^warnedit_lvl:"))
+    app.add_handler(CallbackQueryHandler(ask_warn_text, pattern=r"^warnedit_text:"))
+    app.add_handler(CallbackQueryHandler(ask_warn_media, pattern=r"^warnedit_media:"))
+    app.add_handler(CallbackQueryHandler(reset_warn, pattern=r"^warnedit_reset:"))
+    app.add_handler(CallbackQueryHandler(open_translate_panel, pattern=r"^tr_panel:"))
+    app.add_handler(CallbackQueryHandler(set_translate_lang_cb, pattern=r"^tr_set:"))
+    app.add_handler(CallbackQueryHandler(ask_set_translate_trigger, pattern=r"^tr_trigger:"))
+    app.add_handler(CallbackQueryHandler(open_ai_trigger_panel, pattern=r"^ai_trigger_panel:"))
+    app.add_handler(CallbackQueryHandler(ask_set_ai_trigger, pattern=r"^ai_trigger_set:"))
+    app.add_handler(CallbackQueryHandler(open_shortcuts_panel, pattern=r"^cmdshortcuts_panel:"))
+    app.add_handler(CallbackQueryHandler(ask_edit_command_alias, pattern=r"^cmdalias_edit:"))
+    app.add_handler(CallbackQueryHandler(reset_command_alias_cb, pattern=r"^cmdalias_reset:"))
+    app.add_handler(CallbackQueryHandler(reset_all_command_aliases_cb, pattern=r"^cmdalias_resetall:"))
+    
+    # ===== پاک‌سازی خودکار =====
+    app.add_handler(CallbackQueryHandler(open_cleanup_panel, pattern=r"^cln_panel:"))
+    app.add_handler(CallbackQueryHandler(toggle_cleanup, pattern=r"^cln_toggle:"))
+    app.add_handler(CallbackQueryHandler(ask_interval, pattern=r"^cln_interval:"))
+    app.add_handler(CallbackQueryHandler(adjust_interval, pattern=r"^cln_adjust:"))
+    app.add_handler(CallbackQueryHandler(set_cleanup_count, pattern=r"^cln_count:"))
+    app.add_handler(CallbackQueryHandler(adjust_count, pattern=r"^cln_count_adjust:"))
+    app.add_handler(CallbackQueryHandler(run_cleanup_now, pattern=r"^cln_run:"))
+    
+    app.add_handler(CallbackQueryHandler(open_image_lang_panel, pattern=r"^imglang_panel:"))
+    app.add_handler(CallbackQueryHandler(set_image_lang_cb, pattern=r"^imglang_set:"))
+    app.add_handler(CallbackQueryHandler(ask_add_welcome_media, pattern=r"^wc_media:"))
+    app.add_handler(CallbackQueryHandler(clear_welcome_media_cb, pattern=r"^wc_media_clear:"))
+    app.add_handler(CallbackQueryHandler(show_warned_list, pattern=r"^grp_warned:"))
+    app.add_handler(CallbackQueryHandler(open_bad_words_panel, pattern=r"^badwords_panel:"))
+    app.add_handler(CallbackQueryHandler(ask_add_bad_word, pattern=r"^badwords_add:"))
+    app.add_handler(CallbackQueryHandler(delete_bad_word_cb, pattern=r"^badwords_del:"))
+    app.add_handler(CallbackQueryHandler(open_creator_panel, pattern="^creator_panel_open$"))
+    app.add_handler(CallbackQueryHandler(toggle_global, pattern="^creator_global_(on|off)$"))
+    app.add_handler(CallbackQueryHandler(ask_set_shutdown_text, pattern="^creator_set_msg$"))
+    
+    # ===== پنل سازنده (بخش آپدیت) =====
+    app.add_handler(CallbackQueryHandler(ask_set_update_msg, pattern="^creator_set_update_msg$"))
+    app.add_handler(CallbackQueryHandler(show_update_msg, pattern="^creator_show_update_msg$"))
+    
+    # ===== انتخاب مدل هوش مصنوعی =====
+    app.add_handler(CallbackQueryHandler(ai_model_select, pattern="^ai_model_select$"))
+    app.add_handler(CallbackQueryHandler(ai_use_gemini, pattern="^ai_use_gemini$"))
+    app.add_handler(CallbackQueryHandler(ai_use_chatgpt, pattern="^ai_use_chatgpt$"))
+    
+    # ===== دکمه ری‌استارت =====
+    app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
+
+    # ===== پشتیبانی =====
+    app.add_handler(CallbackQueryHandler(support_menu, pattern="^support_menu$"))
+    app.add_handler(CallbackQueryHandler(confirm_support, pattern="^support_confirm:"))
+    app.add_handler(CallbackQueryHandler(cancel_support, pattern="^support_cancel$"))
+    app.add_handler(CallbackQueryHandler(support_admin_panel, pattern="^support_admin$"))
+    app.add_handler(CallbackQueryHandler(show_support_message, pattern="^support_show:"))
+    app.add_handler(CallbackQueryHandler(support_reply, pattern="^support_reply:"))
+    app.add_handler(CallbackQueryHandler(support_delete, pattern="^support_delete:"))
+    # نکته: دریافت پیام پشتیبانی و پاسخ ادمین دیگه اینجا رجیستر نمی‌شن، چون تو
+    # guarded_private_text و private_media_router (بالاتر) با اولویت درست
+    # چک می‌شن - قبلاً اینجا بودن ولی چون بعد از هندلر عمومی متن پی‌وی ثبت
+    # شده بودن، اصلاً هیچ‌وقت اجرا نمی‌شدن.
+
+    # ===== Jobها =====
+    app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
+    app.job_queue.run_repeating(run_auto_cleanup_job, interval=3600, first=300)
+
+    # ===== ثبت آخرین آیدی پیام =====
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.ALL, track_last_message), group=5)
+
+    logger.info("🤖 ربات در حال اجراست...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
