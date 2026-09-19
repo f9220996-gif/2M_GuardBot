@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-دستورهای «دلار»، «طلا» و «تتر»: قیمت لحظه‌ای هرکدوم، جدا از هم، به‌صورت عکس.
+دستورهای «دلار»، «طلا» و «تتر»: قیمت لحظه‌ای هرکدوم، جدا از هم، به‌صورت عکس یا ویدیو.
 هر عضو اسم یکی از این‌ها رو می‌نویسه و فقط قیمت همون یکی رو می‌بینه.
 هیچ جدول/گرید ترکیبی‌ای وجود نداره - هر سه کاملاً مستقل از هم کار می‌کنن.
 
@@ -10,11 +10,20 @@
 Railway) دیگه نمی‌تونن بهش وصل بشن. برای همین قیمت تتر از CoinGecko
 (بین‌المللی، رایگان، بدون محدودیت جغرافیایی) گرفته می‌شه. دلار و طلا
 مستقیماً از tgju میان.
+
+نکته‌ی مهم درباره‌ی ویدیو:
+وقتی assets/price_card_bg.mp4 وجود داشته باشه، به‌جای عکس، یک PNG شفاف
+شامل پنل+متن قیمت ساخته می‌شه و با ffmpeg روی فریم‌های ویدیو overlay
+می‌شه (burn-in). چون قیمت هر بار عوض می‌شه، دیگه file_id ویدیو کش
+نمی‌شه - هر درخواست، ویدیوی تازه با قیمت لحظه‌ای ساخته می‌شه.
+نیازمندی: ffmpeg باید روی سرور نصب باشه (apt install ffmpeg).
 """
 
 import io
 import os
 import logging
+import subprocess
+import tempfile
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -207,10 +216,6 @@ def _vertical_gradient(width, height, top_color, bottom_color):
 BG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.jpg")
 BG_VIDEO_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.mp4")
 
-# بعد از اولین آپلود موفق ویدیوی پس‌زمینه، file_id اش اینجا کش می‌شه تا
-# دفعات بعد به‌جای آپلود دوباره‌ی کل فایل، فقط همون file_id فرستاده بشه (سریع و کم‌مصرف)
-_cached_video_file_id = None
-
 
 def _load_background(width, height):
     """پس‌زمینه واقعی رو می‌گیره، برش می‌زنه که کامل قاب رو پر کنه، و کمی تیره‌ترش می‌کنه"""
@@ -322,6 +327,112 @@ def render_single_card(symbol: str, price, change, lang: str = "fa", extra_info=
     return img
 
 
+def render_video_price_overlay(symbol: str, price, change, lang: str = "fa") -> Image.Image:
+    """
+    مثل render_single_card ولی بدون پس‌زمینه (کاملاً شفاف/RGBA)، فقط پنل+متن.
+    این تصویر بعداً با ffmpeg روی فریم‌های ویدیو overlay می‌شه.
+    """
+    width, height = 1200, 675
+    gold = (235, 180, 90)
+    name = _tr_name(symbol, lang)
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # پنل نیمه‌شفاف تیره به‌جای افکت شیشه‌ای (چون پس‌زمینه‌ای برای بلور کردن نیست)
+    panel_margin = 70
+    panel = Image.new("RGBA", (width - 2 * panel_margin, height - 2 * panel_margin), (10, 6, 20, 150))
+    mask = Image.new("L", panel.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, panel.size[0] - 1, panel.size[1] - 1], radius=32, fill=255
+    )
+    img.paste(panel, (panel_margin, panel_margin), mask)
+
+    greeting_font = _get_font(24)
+    name_font = _get_font(54)
+    price_label_font = _get_font(24)
+    price_font = _get_font(72)
+    change_font = _get_font(30)
+    footer_font = _get_font(20)
+
+    greeting_text = _fa(_ui(lang, "greeting"))
+    gw = draw.textlength(greeting_text, font=greeting_font)
+    draw.text(((width - gw) / 2, 118), greeting_text, font=greeting_font, fill=(235, 225, 210, 255))
+
+    name_text = _fa(name)
+    nw = draw.textlength(name_text, font=name_font)
+    draw.text(((width - nw) / 2, 168), name_text, font=name_font, fill=(255, 255, 255, 255))
+
+    price_label = _fa(_ui(lang, "price_label"))
+    plw = draw.textlength(price_label, font=price_label_font)
+    draw.text(((width - plw) / 2, 272), price_label, font=price_label_font, fill=(225, 210, 190, 255))
+
+    currency = _ui(lang, "currency")
+    price_text = _fa(f"{price:,} {currency}") if price is not None else _fa(_ui(lang, "unknown"))
+    pw = draw.textlength(price_text, font=price_font)
+    draw.text(((width - pw) / 2, 306), price_text, font=price_font, fill=gold + (255,))
+
+    y_cursor = 400
+    if change is not None:
+        try:
+            change_val = float(change)
+            sign = "+" if change_val >= 0 else ""
+            change_text = _fa(f"{sign}{change_val:.2f}٪ {_ui(lang, 'change_suffix')}")
+            cw = draw.textlength(change_text, font=change_font)
+            draw.text(
+                ((width - cw) / 2, y_cursor),
+                change_text,
+                font=change_font,
+                fill=_card_color(change) + (255,),
+            )
+        except (TypeError, ValueError):
+            pass
+
+    from persian_date import format_persian_datetime
+    footer_text = _fa(f"{_ui(lang, 'updated')}: {format_persian_datetime()}")
+    fw = draw.textlength(footer_text, font=footer_font)
+    draw.text(
+        ((width - fw) / 2, height - panel_margin - 44),
+        footer_text,
+        font=footer_font,
+        fill=(220, 205, 180, 255),
+    )
+
+    return img
+
+
+def _burn_overlay_on_video(overlay_img: Image.Image) -> str:
+    """
+    overlay_img (PNG شفاف) رو با ffmpeg روی فریم‌های BG_VIDEO_PATH می‌کشه
+    و مسیر فایل ویدیوی نهایی (mp4) رو برمی‌گردونه. صدای اصلی ویدیو
+    (اگه داشته باشه) دست‌نخورده کپی می‌شه.
+    فراخوان مسئول پاک کردن فایل خروجی بعد از استفاده‌ست.
+    """
+    overlay_path = tempfile.mktemp(suffix=".png")
+    overlay_img.save(overlay_path)
+    out_path = tempfile.mktemp(suffix=".mp4")
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", BG_VIDEO_PATH,
+        "-i", overlay_path,
+        "-filter_complex",
+        "[1:v][0:v]scale2ref=main_w:main_h[ovr][base];[base][ovr]overlay=0:0:shortest=1",
+        "-c:a", "copy",
+        out_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode("utf-8", errors="ignore") if e.stderr else ""
+        raise RuntimeError(f"ffmpeg overlay failed: {stderr[-800:]}") from e
+    finally:
+        if os.path.exists(overlay_path):
+            os.remove(overlay_path)
+
+    return out_path
+
+
 def _image_to_bytes(img: Image.Image) -> io.BytesIO:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -378,26 +489,29 @@ def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_id, 
 
 async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE, chat, symbol, price, change, lang, caption):
     """
-    اگه ویدیوی پس‌زمینه (assets/price_card_bg.mp4) وجود داشت، همونو با کپشن
-    قیمت می‌فرسته (و file_id اش رو کش می‌کنه تا دفعات بعد سریع‌تر باشه).
-    در غیر این صورت، مثل قبل یه عکس با متن قیمت روش می‌سازه و می‌فرسته.
+    اگه ویدیوی پس‌زمینه (assets/price_card_bg.mp4) وجود داشت، یک PNG شفاف
+    شامل قیمت لحظه‌ای می‌سازه، با ffmpeg روی فریم‌های ویدیو overlay
+    (burn-in) می‌کنه و همون رو با کپشن می‌فرسته. چون قیمت هر بار فرق
+    می‌کنه، ویدیوی نهایی کش نمی‌شه - هر بار از نو ساخته می‌شه.
+    اگه ساخت ویدیو به هر دلیلی شکست بخوره (مثلاً ffmpeg نصب نباشه)،
+    به همون روش قبلی (عکس با متن قیمت) برمی‌گرده.
     """
-    global _cached_video_file_id
     message = update.effective_message
     sent = None
 
     if os.path.exists(BG_VIDEO_PATH):
+        out_path = None
         try:
-            if _cached_video_file_id:
-                sent = await message.reply_video(video=_cached_video_file_id, caption=caption)
-            else:
-                with open(BG_VIDEO_PATH, "rb") as f:
-                    sent = await message.reply_video(video=f, caption=caption)
-                if sent and sent.video:
-                    _cached_video_file_id = sent.video.file_id
+            overlay_img = render_video_price_overlay(symbol, price, change, lang=lang)
+            out_path = _burn_overlay_on_video(overlay_img)
+            with open(out_path, "rb") as f:
+                sent = await message.reply_video(video=f, caption=caption)
         except Exception as e:
-            logger.warning(f"ارسال ویدیوی پس‌زمینه ناموفق بود، برگشت به عکس: {e}")
+            logger.warning(f"ساخت ویدیوی قیمت‌دار ناموفق بود، برگشت به عکس: {e}")
             sent = None
+        finally:
+            if out_path and os.path.exists(out_path):
+                os.remove(out_path)
 
     if sent is None:
         img = render_single_card(symbol, price, change, lang=lang)
