@@ -43,7 +43,7 @@ from creator import (
 )
 from reports import cmd_gozaresh, send_pending_reports_job
 from persian_date import cmd_tarikh
-from crypto import cmd_crypto_all, cmd_crypto_single, SYMBOL_MAP, FIAT_GOLD_MAP
+from crypto import cmd_crypto_single, SYMBOL_MAP, FIAT_GOLD_MAP
 from welcome import (
     on_new_member_welcome, open_welcome_panel, toggle_welcome,
     preview_welcome, reset_welcome, ask_edit_welcome, receive_welcome_text,
@@ -110,7 +110,6 @@ PERSIAN_COMMANDS = {
     "گزارش": cmd_gozaresh,
     "ترجمه": cmd_tarjome,
     "تاریخ": cmd_tarikh,
-    "رمز ارز": cmd_crypto_all,
 }
 
 PRICE_LOOKUP_NAMES = set(SYMBOL_MAP.keys()) | set(FIAT_GOLD_MAP.keys())
@@ -360,9 +359,6 @@ def main():
         text = (update.effective_message.text or "").strip()
         if text in PRICE_LOOKUP_NAMES:
             await cmd_crypto_single(update, context)
-            return
-        elif text == "رمز ارز":
-            await cmd_crypto_all(update, context)
             return
 
         # فقط اگه کاربر صراحتاً یه مدل هوش مصنوعی رو انتخاب کرده باشه، پیامش به AI می‌ره
