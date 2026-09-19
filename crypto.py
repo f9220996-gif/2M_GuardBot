@@ -1,152 +1,394 @@
 # -*- coding: utf-8 -*-
 """
-ماژول قیمت ارزهای دیجیتال، دلار و طلا.
+دستورهای «دلار»، «طلا» و «تتر»: قیمت لحظه‌ای هرکدوم، جدا از هم، به‌صورت عکس.
+هر عضو اسم یکی از این‌ها رو می‌نویسه و فقط قیمت همون یکی رو می‌بینه.
+هیچ جدول/گرید ترکیبی‌ای وجود نداره - هر سه کاملاً مستقل از هم کار می‌کنن.
 
-- قیمت ارزهای دیجیتال از API عمومی CoinGecko گرفته می‌شه (بر حسب دلار آمریکا).
-- قیمت دلار/یورو از API عمومی exchangerate.host گرفته می‌شه.
-- قیمت طلا (اونس جهانی) از یک API عمومی گرفته می‌شه.
-
-نکته‌ی مهم: این قیمت‌ها نرخ‌های جهانی/بین‌المللی هستن، نه نرخ بازار آزاد ایران
-(صرافی/طلافروشی). اگه به نرخ بازار آزاد ایران نیاز داری، باید تابع
-_fetch_fiat_rate رو با یک API داخلی مناسب (مثل نوسان، بن‌بست و مشابه) جایگزین کنی.
-
-وابستگی: این فایل از aiohttp استفاده می‌کنه. مطمئن شو در requirements.txt
-پروژه‌ات خط زیر وجود داره:
-    aiohttp
+نکته‌ی مهم درباره‌ی منبع داده:
+قبلاً قیمت رمزارزها از API نوبیتکس گرفته می‌شد، ولی چون نوبیتکس اخیراً هدف
+تحریم‌های مستقیم آمریکا قرار گرفته، سرورهای میزبانی خارج از ایران (مثل
+Railway) دیگه نمی‌تونن بهش وصل بشن. برای همین قیمت تتر از CoinGecko
+(بین‌المللی، رایگان، بدون محدودیت جغرافیایی) گرفته می‌شه. دلار و طلا
+مستقیماً از tgju میان.
 """
 
-import logging
-from typing import Optional
+import io
+import os
+import requests
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-import aiohttp
 from telegram import Update
 from telegram.ext import ContextTypes
 
-logger = logging.getLogger(__name__)
-
-# ===== نگاشت نام فارسی ارز دیجیتال -> شناسه‌ی CoinGecko =====
-SYMBOL_MAP = {
-    "بیت کوین": "bitcoin",
-    "بیتکوین": "bitcoin",
-    "اتریوم": "ethereum",
-    "تتر": "tether",
-    "بایننس کوین": "binancecoin",
-    "ریپل": "ripple",
-    "ریپل کوین": "ripple",
-    "دوج کوین": "dogecoin",
-    "کاردانو": "cardano",
-    "سولانا": "solana",
-    "لایت کوین": "litecoin",
-    "ترون": "tron",
-    "پولکادات": "polkadot",
-    "شیبا": "shiba-inu",
-    "شیبا اینو": "shiba-inu",
-}
-
-# ===== نگاشت نام فارسی ارز فیات/طلا -> کد =====
-FIAT_GOLD_MAP = {
-    "دلار": "USD",
-    "یورو": "EUR",
-    "طلا": "XAU",
-}
+import arabic_reshaper
+from bidi.algorithm import get_display
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
-FOREX_URL = "https://api.exchangerate.host/latest"
-GOLD_URL = "https://api.gold-api.com/price/XAU"
+TGJU_URL = "https://call4.tgju.org/ajax.json"
 
-_TIMEOUT = aiohttp.ClientTimeout(total=10)
+USER_AGENT = "Mozilla/5.0 (compatible; TelegramBot/1.0; +https://core.telegram.org/bots)"
+
+# دلار و طلا رمزارز نیستن، برای همین از یه منبع عمومی دیگه (tgju) میان
+FIAT_GOLD_MAP = {
+    "دلار": ("price_dollar_rl", "💵", "dollar"),
+    "طلا": ("geram18", "🥇", "gold"),
+}
+
+# اسم فارسی -> (نماد کوتاه, ایموجی) — فقط تتر
+SYMBOL_MAP = {
+    "تتر": ("usdt", "💵"),
+}
+
+# نماد کوتاه -> آیدیِ همون کوین تو CoinGecko
+COINGECKO_IDS = {
+    "usdt": "tether",
+}
+
+# ترجمه اسم هر مورد به زبان‌های دیگه (برای نمایش داخل عکس)
+NAME_TRANSLATIONS = {
+    "usdt": {"fa": "تتر", "en": "Tether", "ar": "تيثر"},
+    "dollar": {"fa": "دلار", "en": "US Dollar", "ar": "الدولار الأمريكي"},
+    "gold": {"fa": "طلا (۱۸ عیار)", "en": "Gold (18k)", "ar": "الذهب (18 قيراط)"},
+}
+
+UI_STRINGS = {
+    "fa": {
+        "greeting": "سلام جوان ایرانی", "price_label": "قیمت لحظه‌ای", "currency": "تومان",
+        "change_suffix": "تغییر نسبت به دیروز", "updated": "بروزرسانی", "unknown": "نامشخص",
+    },
+    "en": {
+        "greeting": "Hello Iranian Youth", "price_label": "Live Price", "currency": "Toman",
+        "change_suffix": "change vs yesterday", "updated": "Updated", "unknown": "N/A",
+    },
+    "ar": {
+        "greeting": "مرحباً أيها الشاب الإيراني", "price_label": "السعر اللحظي", "currency": "تومان",
+        "change_suffix": "التغيير مقارنة بالأمس", "updated": "آخر تحديث", "unknown": "غير معروف",
+    },
+}
+
+LANG_NAMES = {"fa": "فارسی", "en": "English", "ar": "العربية"}
 
 
-async def _fetch_crypto_price(coin_id: str, vs_currency: str = "usd") -> Optional[float]:
-    """قیمت یک ارز دیجیتال رو بر حسب دلار از CoinGecko می‌گیره."""
-    params = {"ids": coin_id, "vs_currencies": vs_currency}
+def _tr_name(symbol, lang):
+    entry = NAME_TRANSLATIONS.get(symbol)
+    if not entry:
+        return symbol
+    return entry.get(lang, entry.get("fa", symbol))
+
+
+def _ui(lang, key):
+    return UI_STRINGS.get(lang, UI_STRINGS["fa"]).get(key, UI_STRINGS["fa"][key])
+
+FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "Vazirmatn-Bold.ttf")
+FALLBACK_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "DejaVuSans-Bold.ttf")
+
+
+def _get_font(size):
+    if os.path.exists(FONT_PATH):
+        return ImageFont.truetype(FONT_PATH, size)
+    if os.path.exists(FALLBACK_FONT_PATH):
+        return ImageFont.truetype(FALLBACK_FONT_PATH, size)
+    return ImageFont.load_default()
+
+
+def _fa(text: str) -> str:
+    """متن فارسی رو برای نمایش درست (حروف چسبیده + جهت راست‌به‌چپ) روی عکس آماده می‌کنه"""
+    reshaped = arabic_reshaper.reshape(text)
+    return get_display(reshaped)
+
+
+# ---------------------------------------------------------------------------
+# دریافت داده: CoinGecko برای تتر، tgju برای نرخ دلار/طلا
+# ---------------------------------------------------------------------------
+
+def fetch_coingecko_data():
+    """قیمت دلاریِ تتر رو از CoinGecko می‌گیره"""
+    ids = ",".join(sorted(set(COINGECKO_IDS.values())))
+    params = {
+        "ids": ids,
+        "vs_currencies": "usd",
+        "include_24hr_change": "true",
+    }
+    headers = {"User-Agent": USER_AGENT}
+    resp = requests.get(COINGECKO_URL, params=params, headers=headers, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_price_toman(cg_data: dict, symbol: str, usd_to_toman):
+    """
+    قیمت یک رمزارز به تومان + درصد تغییر ۲۴ ساعته رو برمی‌گردونه.
+    usd_to_toman: نرخ لحظه‌ایِ هر دلار به تومان (از tgju)
+    """
+    cg_id = COINGECKO_IDS.get(symbol)
+    if not cg_id:
+        return None, None
+    entry = cg_data.get(cg_id)
+    if not entry:
+        return None, None
+    usd_price = entry.get("usd")
+    change = entry.get("usd_24h_change")
+    if usd_price is None or usd_to_toman is None:
+        return None, change
     try:
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.get(COINGECKO_URL, params=params) as resp:
-                if resp.status != 200:
-                    logger.warning(f"CoinGecko status {resp.status} for {coin_id}")
-                    return None
-                data = await resp.json()
-                return data.get(coin_id, {}).get(vs_currency)
-    except Exception as e:
-        logger.warning(f"crypto price fetch failed for {coin_id}: {e}")
-        return None
+        price_toman = int(float(usd_price) * float(usd_to_toman))
+    except (TypeError, ValueError):
+        return None, change
+    return price_toman, change
 
 
-async def _fetch_gold_price() -> Optional[float]:
-    """قیمت جهانی هر اونس طلا بر حسب دلار."""
+def fetch_tgju_data():
+    resp = requests.get(TGJU_URL, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("current", {})
+
+
+def get_fiat_gold_price(tgju_data: dict, key: str):
+    """قیمت دلار/طلا به تومان + درصد تغییر رو برمی‌گردونه، یا None اگه پیدا نشد"""
+    entry = tgju_data.get(key)
+    if not entry:
+        return None, None
     try:
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.get(GOLD_URL) as resp:
-                if resp.status != 200:
-                    logger.warning(f"gold API status {resp.status}")
-                    return None
-                data = await resp.json()
-                price = data.get("price")
-                return float(price) if price is not None else None
-    except Exception as e:
-        logger.warning(f"gold price fetch failed: {e}")
-        return None
-
-
-async def _fetch_forex_rate(code: str) -> Optional[float]:
-    """نرخ برابری یک ارز فیات (مثل دلار یا یورو) بر حسب دلار آمریکا."""
-    if code == "USD":
-        return 1.0
+        price_str = str(entry.get("p", "")).replace(",", "")
+        price_rial = float(price_str)
+        price_toman = int(price_rial / 10)
+    except (TypeError, ValueError):
+        return None, None
+    change = entry.get("dp") or entry.get("d")
     try:
-        params = {"base": code, "symbols": "USD"}
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.get(FOREX_URL, params=params) as resp:
-                if resp.status != 200:
-                    logger.warning(f"forex API status {resp.status} for {code}")
-                    return None
-                data = await resp.json()
-                return data.get("rates", {}).get("USD")
-    except Exception as e:
-        logger.warning(f"forex rate fetch failed for {code}: {e}")
-        return None
+        change = float(str(change).replace("%", "")) if change is not None else None
+    except (TypeError, ValueError):
+        change = None
+    return price_toman, change
 
 
-async def _fetch_fiat_rate(code: str) -> Optional[float]:
-    """مسیریابی بین طلا و بقیه‌ی ارزهای فیات."""
-    if code == "XAU":
-        return await _fetch_gold_price()
-    return await _fetch_forex_rate(code)
+def get_usd_to_toman_rate(tgju_data: dict):
+    """نرخ لحظه‌ایِ هر دلار به تومان (برای تبدیل قیمت دلاریِ تتر)"""
+    rate, _ = get_fiat_gold_price(tgju_data, "price_dollar_rl")
+    return rate
+
+
+def _card_color(day_change):
+    try:
+        if day_change is not None and float(day_change) < 0:
+            return (255, 90, 90)  # قرمز برای منفی
+    except (TypeError, ValueError):
+        pass
+    return (90, 200, 130)  # سبز برای مثبت یا نامشخص
+
+
+COIN_COLORS = {
+    "usdt": (38, 161, 123),
+    "dollar": (90, 160, 230),
+    "gold": (222, 180, 90),
+}
+
+
+def _coin_color(symbol):
+    return COIN_COLORS.get(symbol, (147, 51, 234))
+
+
+def _vertical_gradient(width, height, top_color, bottom_color):
+    img = Image.new("RGB", (width, height), top_color)
+    draw = ImageDraw.Draw(img)
+    for y in range(height):
+        t = y / height
+        r = int(top_color[0] + (bottom_color[0] - top_color[0]) * t)
+        g = int(top_color[1] + (bottom_color[1] - top_color[1]) * t)
+        b = int(top_color[2] + (bottom_color[2] - top_color[2]) * t)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    return img
+
+
+BG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.jpg")
+
+
+def _load_background(width, height):
+    """پس‌زمینه واقعی رو می‌گیره، برش می‌زنه که کامل قاب رو پر کنه، و کمی تیره‌ترش می‌کنه"""
+    if not os.path.exists(BG_IMAGE_PATH):
+        return _vertical_gradient(width, height, (18, 10, 34), (6, 4, 14))
+
+    bg = Image.open(BG_IMAGE_PATH).convert("RGB")
+    src_w, src_h = bg.size
+    target_ratio = width / height
+    src_ratio = src_w / src_h
+    if src_ratio > target_ratio:
+        new_w = int(src_h * target_ratio)
+        left = (src_w - new_w) // 2
+        bg = bg.crop((left, 0, left + new_w, src_h))
+    else:
+        new_h = int(src_w / target_ratio)
+        top = (src_h - new_h) // 3  # کمی از بالا برش بخوره که کوین‌ها بمونن
+        bg = bg.crop((0, top, src_w, top + new_h))
+    bg = bg.resize((width, height), Image.LANCZOS)
+
+    # یه لایه تیره‌ی نیمه‌شفاف رو کل عکس، که متن روش خواناتر بشه
+    overlay = Image.new("RGBA", (width, height), (8, 4, 18, 110))
+    bg = Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
+    return bg
+
+
+def _glass_panel(img, x0, y0, x1, y1, radius=32, blur=14, white_mix=0.06):
+    """
+    افکت شیشه‌ی مات واقعی (مثل پنل‌های iOS): همون قسمت از پس‌زمینه رو
+    بلور می‌کنه، یه‌کم سفید باهاش قاطی می‌کنه (حس شیشه‌ی مه‌گرفته)،
+    و با یه ماسک گردشده جاش می‌ذاره. بدون خط دور، بدون کادر اضافه.
+    """
+    x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
+    region = img.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(blur))
+    white_layer = Image.new("RGB", region.size, (255, 255, 255))
+    region = Image.blend(region, white_layer, white_mix)
+
+    mask = Image.new("L", region.size, 0)
+    mdraw = ImageDraw.Draw(mask)
+    mdraw.rounded_rectangle([0, 0, region.size[0] - 1, region.size[1] - 1], radius=radius, fill=255)
+
+    img = img.copy()
+    img.paste(region, (x0, y0), mask)
+    return img
+
+
+def render_single_card(symbol: str, price, change, lang: str = "fa", extra_info=None) -> Image.Image:
+    width, height = 1200, 675  # نسبت دقیق 16:9
+    gold = (235, 180, 90)  # طلایی/کهربایی هماهنگ با پس‌زمینه
+    name = _tr_name(symbol, lang)
+
+    img = _load_background(width, height)
+
+    # پنل شیشه‌ای مات (بدون خط دور، بدون گوشه‌های تزئینی)
+    panel_margin = 70
+    img = _glass_panel(img, panel_margin, panel_margin, width - panel_margin, height - panel_margin)
+    draw = ImageDraw.Draw(img)
+
+    greeting_font = _get_font(24)
+    name_font = _get_font(54)
+    price_label_font = _get_font(24)
+    price_font = _get_font(72)
+    change_font = _get_font(30)
+    footer_font = _get_font(20)
+    detail_font = _get_font(22)
+
+    greeting_text = _fa(_ui(lang, "greeting"))
+    gw = draw.textlength(greeting_text, font=greeting_font)
+    draw.text(((width - gw) / 2, 118), greeting_text, font=greeting_font, fill=(235, 225, 210))
+
+    name_text = _fa(name)
+    nw = draw.textlength(name_text, font=name_font)
+    draw.text(((width - nw) / 2, 168), name_text, font=name_font, fill=(255, 255, 255))
+
+    price_label = _fa(_ui(lang, "price_label"))
+    plw = draw.textlength(price_label, font=price_label_font)
+    draw.text(((width - plw) / 2, 272), price_label, font=price_label_font, fill=(225, 210, 190))
+
+    currency = _ui(lang, "currency")
+    price_text = _fa(f"{price:,} {currency}") if price is not None else _fa(_ui(lang, "unknown"))
+    pw = draw.textlength(price_text, font=price_font)
+    draw.text(((width - pw) / 2, 306), price_text, font=price_font, fill=gold)
+
+    y_cursor = 400
+    color = _card_color(change)
+    if change is not None:
+        try:
+            change_val = float(change)
+            sign = "+" if change_val >= 0 else ""
+            change_text = _fa(f"{sign}{change_val:.2f}٪ {_ui(lang, 'change_suffix')}")
+            cw = draw.textlength(change_text, font=change_font)
+            draw.text(((width - cw) / 2, y_cursor), change_text, font=change_font, fill=color)
+            y_cursor += 48
+        except (TypeError, ValueError):
+            pass
+
+    if extra_info:
+        for line in extra_info:
+            line_text = _fa(line)
+            lw = draw.textlength(line_text, font=detail_font)
+            draw.text(((width - lw) / 2, y_cursor), line_text, font=detail_font, fill=(210, 205, 220))
+            y_cursor += 34
+
+    from persian_date import format_persian_datetime
+    footer_text = _fa(f"{_ui(lang, 'updated')}: {format_persian_datetime()}")
+    fw = draw.textlength(footer_text, font=footer_font)
+    draw.text(((width - fw) / 2, height - panel_margin - 44), footer_text, font=footer_font, fill=(220, 205, 180))
+
+    return img
+
+
+def _image_to_bytes(img: Image.Image) -> io.BytesIO:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    buf.name = "price.png"
+    return buf
+
+
+
+def _build_caption(symbol, price, change, lang="fa"):
+    name = _tr_name(symbol, lang)
+    currency = _ui(lang, "currency")
+    if price is None:
+        price_str = _ui(lang, "unknown")
+    else:
+        price_str = f"{price:,} {currency}"
+
+    if lang == "en":
+        text = f"{name} today: {price_str}"
+    elif lang == "ar":
+        text = f"{name} اليوم: {price_str}"
+    else:
+        text = f"{name} امروز {price_str}"
+
+    if change is not None:
+        try:
+            change_val = float(change)
+            sign = "+" if change_val >= 0 else ""
+            text += f" ({sign}{change_val:.2f}٪)"
+        except (TypeError, ValueError):
+            pass
+    return text
 
 
 async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    وقتی کاربر اسم یه ارز دیجیتال یا دلار/طلا رو مستقیم توی گروه یا پی‌وی
-    تایپ می‌کنه (مثلاً «بیت کوین» یا «دلار»)، این تابع قیمتش رو جواب می‌ده.
-    """
-    message = update.effective_message
-    if not message:
-        return
-
-    text = (message.text or "").strip()
-
-    if text in SYMBOL_MAP:
-        coin_id = SYMBOL_MAP[text]
-        price = await _fetch_crypto_price(coin_id)
-        if price is None:
-            await message.reply_text(
-                "⚠️ در حال حاضر امکان دریافت قیمت وجود نداره. لطفاً چند لحظه دیگه دوباره امتحان کن."
-            )
-            return
-        await message.reply_text(f"💰 قیمت {text}: {price:,.2f} دلار")
-        return
+    import database as db
+    text = (update.effective_message.text or "").strip()
+    chat = update.effective_chat
+    lang = db.get_image_lang(chat.id) if chat and chat.type in ("group", "supergroup") else "fa"
 
     if text in FIAT_GOLD_MAP:
-        code = FIAT_GOLD_MAP[text]
-        rate = await _fetch_fiat_rate(code)
-        if rate is None:
-            await message.reply_text(
-                "⚠️ در حال حاضر امکان دریافت قیمت وجود نداره. لطفاً چند لحظه دیگه دوباره امتحان کن."
-            )
+        key, emoji, trans_key = FIAT_GOLD_MAP[text]
+        try:
+            tgju_data = fetch_tgju_data()
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم قیمت {text} رو بگیرم.\n{e}")
             return
-        unit = "دلار" if code == "XAU" else "دلار آمریکا"
-        await message.reply_text(f"💵 قیمت {text}: {rate:,.2f} {unit}")
+        price, change = get_fiat_gold_price(tgju_data, key)
+        img = render_single_card(trans_key, price, change, lang=lang)
+        caption = _build_caption(trans_key, price, change, lang=lang)
+        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
         return
 
-    # اگه به هر دلیلی متن پیام تو هیچ‌کدوم از نقشه‌ها نبود، کاری نکن
-    return
+    match = SYMBOL_MAP.get(text)
+    if not match:
+        return
+    symbol, emoji = match
+
+    try:
+        try:
+            tgju_data = fetch_tgju_data()
+            usd_toman = get_usd_to_toman_rate(tgju_data)
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم نرخ دلار رو بگیرم (لازم برای تبدیل قیمت به تومان).\n{e}")
+            return
+
+        try:
+            cg_data = fetch_coingecko_data()
+        except Exception as e:
+            await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
+            return
+
+        price, change = get_price_toman(cg_data, symbol, usd_toman)
+        img = render_single_card(symbol, price, change, lang=lang)
+        caption = _build_caption(symbol, price, change, lang=lang)
+        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+    except Exception as e:
+        await update.effective_message.reply_text(f"❌ خطای غیرمنتظره تو ساختن قیمت {text}.\n{e}")
