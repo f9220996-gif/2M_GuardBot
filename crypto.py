@@ -14,6 +14,7 @@ Railway) دیگه نمی‌تونن بهش وصل بشن. برای همین قی
 
 import io
 import os
+import logging
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -22,6 +23,8 @@ from telegram.ext import ContextTypes
 
 import arabic_reshaper
 from bidi.algorithm import get_display
+
+logger = logging.getLogger(__name__)
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
 TGJU_URL = "https://call4.tgju.org/ajax.json"
@@ -202,6 +205,11 @@ def _vertical_gradient(width, height, top_color, bottom_color):
 
 
 BG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.jpg")
+BG_VIDEO_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.mp4")
+
+# بعد از اولین آپلود موفق ویدیوی پس‌زمینه، file_id اش اینجا کش می‌شه تا
+# دفعات بعد به‌جای آپلود دوباره‌ی کل فایل، فقط همون file_id فرستاده بشه (سریع و کم‌مصرف)
+_cached_video_file_id = None
 
 
 def _load_background(width, height):
@@ -348,6 +356,56 @@ def _build_caption(symbol, price, change, lang="fa"):
     return text
 
 
+async def _auto_delete_price_message(context: ContextTypes.DEFAULT_TYPE):
+    """چند ثانیه بعد از ارسال، پیام قیمت رو (فقط تو پی‌وی) پاک می‌کنه"""
+    job = context.job
+    try:
+        await context.bot.delete_message(chat_id=job.chat_id, message_id=job.data)
+    except Exception:
+        pass
+
+
+def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_id, delay: int = 5):
+    """اگه چت از نوع پی‌وی بود و job_queue در دسترس بود، حذف خودکار رو زمان‌بندی می‌کنه"""
+    if not chat or chat.type != "private":
+        return
+    if not context.job_queue:
+        return
+    context.job_queue.run_once(
+        _auto_delete_price_message, delay, chat_id=chat.id, data=message_id
+    )
+
+
+async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE, chat, symbol, price, change, lang, caption):
+    """
+    اگه ویدیوی پس‌زمینه (assets/price_card_bg.mp4) وجود داشت، همونو با کپشن
+    قیمت می‌فرسته (و file_id اش رو کش می‌کنه تا دفعات بعد سریع‌تر باشه).
+    در غیر این صورت، مثل قبل یه عکس با متن قیمت روش می‌سازه و می‌فرسته.
+    """
+    global _cached_video_file_id
+    message = update.effective_message
+    sent = None
+
+    if os.path.exists(BG_VIDEO_PATH):
+        try:
+            if _cached_video_file_id:
+                sent = await message.reply_video(video=_cached_video_file_id, caption=caption)
+            else:
+                with open(BG_VIDEO_PATH, "rb") as f:
+                    sent = await message.reply_video(video=f, caption=caption)
+                if sent and sent.video:
+                    _cached_video_file_id = sent.video.file_id
+        except Exception as e:
+            logger.warning(f"ارسال ویدیوی پس‌زمینه ناموفق بود، برگشت به عکس: {e}")
+            sent = None
+
+    if sent is None:
+        img = render_single_card(symbol, price, change, lang=lang)
+        sent = await message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+
+    _schedule_auto_delete(context, chat, sent.message_id)
+
+
 async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import database as db
     text = (update.effective_message.text or "").strip()
@@ -362,9 +420,8 @@ async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_message.reply_text(f"❌ نتونستم قیمت {text} رو بگیرم.\n{e}")
             return
         price, change = get_fiat_gold_price(tgju_data, key)
-        img = render_single_card(trans_key, price, change, lang=lang)
         caption = _build_caption(trans_key, price, change, lang=lang)
-        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+        await _send_price_result(update, context, chat, trans_key, price, change, lang, caption)
         return
 
     match = SYMBOL_MAP.get(text)
@@ -387,8 +444,7 @@ async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         price, change = get_price_toman(cg_data, symbol, usd_toman)
-        img = render_single_card(symbol, price, change, lang=lang)
         caption = _build_caption(symbol, price, change, lang=lang)
-        await update.effective_message.reply_photo(photo=_image_to_bytes(img), caption=caption)
+        await _send_price_result(update, context, chat, symbol, price, change, lang, caption)
     except Exception as e:
         await update.effective_message.reply_text(f"❌ خطای غیرمنتظره تو ساختن قیمت {text}.\n{e}")
