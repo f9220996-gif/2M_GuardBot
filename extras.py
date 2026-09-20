@@ -32,6 +32,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 
+from PIL import Image
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, MessageHandler, filters
@@ -548,6 +549,43 @@ def _setup_font():
             logger.warning(f"لود فونت نمودار ناموفق بود: {e}")
 
 
+# پس‌زمینه‌ی نمودار: هر عکسی که تو پوشه‌ی assets با یکی از این اسم‌ها بذاری استفاده می‌شه.
+# اگه هیچ‌کدوم نبود، همون پس‌زمینه‌ی کارت قیمت‌ها (price_card_bg.jpg) استفاده می‌شه.
+CHART_BG_NAMES = ("chart_bg.jpg", "chart_bg.jpeg", "chart_bg.png")
+CHART_W, CHART_H = 1200, 675
+PANEL_MARGIN = 40
+
+
+def _fit_background(bg: Image.Image, width: int, height: int) -> Image.Image:
+    """عکس رو برش می‌زنه که کامل قاب رو پر کنه و یه لایه‌ی تیره‌ی نیمه‌شفاف روش می‌ندازه"""
+    bg = bg.convert("RGB")
+    src_w, src_h = bg.size
+    target = width / height
+    if src_w / src_h > target:
+        new_w = int(src_h * target)
+        left = (src_w - new_w) // 2
+        bg = bg.crop((left, 0, left + new_w, src_h))
+    else:
+        new_h = int(src_w / target)
+        top = (src_h - new_h) // 2
+        bg = bg.crop((0, top, src_w, top + new_h))
+    bg = bg.resize((width, height), Image.LANCZOS)
+    overlay = Image.new("RGBA", (width, height), (8, 4, 18, 110))
+    return Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
+
+
+def _load_chart_background(width: int, height: int) -> Image.Image:
+    assets = os.path.dirname(pc.FONT_PATH)
+    for name in CHART_BG_NAMES:
+        path = os.path.join(assets, name)
+        if os.path.exists(path):
+            try:
+                return _fit_background(Image.open(path), width, height)
+            except Exception as e:
+                logger.warning(f"لود پس‌زمینه‌ی نمودار ({name}) ناموفق بود: {e}")
+    return pc._load_background(width, height)
+
+
 def render_chart(symbol: str, rows, period_days: int, period_label: str) -> io.BytesIO:
     _setup_font()
 
@@ -563,15 +601,16 @@ def render_chart(symbol: str, rows, period_days: int, period_label: str) -> io.B
     y_lo, y_hi = lo - pad, hi + pad
 
     color = tuple(c / 255 for c in pc._coin_color(symbol))
-    bg = "#140c24"
+    gold = (235 / 255, 180 / 255, 90 / 255)   # همون طلایی کارت قیمت‌ها
     soft = "#e6dccb"
 
-    fig = Figure(figsize=(12, 6.75), dpi=100, facecolor=bg)
-    ax = fig.add_axes([0.10, 0.10, 0.87, 0.60], facecolor=bg)
+    # نمودار روی زمینه‌ی شفاف کشیده می‌شه، بعد روی پس‌زمینه + پنل شیشه‌ای گذاشته می‌شه
+    fig = Figure(figsize=(CHART_W / 100, CHART_H / 100), dpi=100, facecolor="none")
+    ax = fig.add_axes([0.12, 0.12, 0.80, 0.50], facecolor="none")
 
-    ax.plot(times, prices, color=color, linewidth=2.8, solid_capstyle="round")
-    ax.fill_between(times, prices, y_lo, color=color, alpha=0.15)
-    ax.scatter([times[-1]], [prices[-1]], color=color, s=70, zorder=5)
+    ax.plot(times, prices, color=color, linewidth=3, solid_capstyle="round")
+    ax.fill_between(times, prices, y_lo, color=color, alpha=0.18)
+    ax.scatter([times[-1]], [prices[-1]], color=color, s=80, zorder=5)
     ax.set_ylim(y_lo, y_hi)
     ax.margins(x=0.02)
 
@@ -586,8 +625,8 @@ def render_chart(symbol: str, rows, period_days: int, period_label: str) -> io.B
         ax.xaxis.set_major_formatter(ticker.FuncFormatter(_jal))
     ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=7, tz=TEHRAN))
 
-    ax.tick_params(colors="#bdb3c9", labelsize=12, length=0)
-    ax.grid(True, color="white", alpha=0.07, linewidth=1)
+    ax.tick_params(colors=soft, labelsize=12, length=0)
+    ax.grid(True, color="white", alpha=0.10, linewidth=1)
     for spine in ax.spines.values():
         spine.set_visible(False)
 
@@ -597,15 +636,26 @@ def render_chart(symbol: str, rows, period_days: int, period_label: str) -> io.B
     sign = "+" if change >= 0 else ""
 
     name = pc._tr_name(symbol, "fa")
-    fig.text(0.5, 0.925, pc._fa(name), ha="center", va="center", fontsize=32, color="white")
-    fig.text(0.5, 0.868, pc._fa(period_label), ha="center", va="center", fontsize=16, color=soft)
-    fig.text(0.5, 0.805, pc._fa(f"{int(last):,} تومان"), ha="center", va="center",
-             fontsize=26, color=color)
-    fig.text(0.5, 0.748, pc._fa(f"{sign}{change:.2f}٪"), ha="center", va="center",
-             fontsize=17, color=change_color)
+    fig.text(0.5, 0.865, pc._fa(name), ha="center", va="center", fontsize=30, color="white")
+    fig.text(0.5, 0.808, pc._fa(period_label), ha="center", va="center", fontsize=15, color=soft)
+    fig.text(0.5, 0.748, pc._fa(f"{int(last):,} تومان"), ha="center", va="center",
+             fontsize=25, color=gold)
+    fig.text(0.5, 0.690, pc._fa(f"{sign}{change:.2f}٪"), ha="center", va="center",
+             fontsize=16, color=change_color)
+
+    chart_buf = io.BytesIO()
+    fig.savefig(chart_buf, format="png", transparent=True)
+    chart_buf.seek(0)
+    chart = Image.open(chart_buf).convert("RGBA")
+    if chart.size != (CHART_W, CHART_H):
+        chart = chart.resize((CHART_W, CHART_H), Image.LANCZOS)
+
+    base = _load_chart_background(CHART_W, CHART_H)
+    base = pc._glass_panel(base, PANEL_MARGIN, PANEL_MARGIN, CHART_W - PANEL_MARGIN, CHART_H - PANEL_MARGIN)
+    final = Image.alpha_composite(base.convert("RGBA"), chart).convert("RGB")
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", facecolor=bg)
+    final.save(buf, format="PNG")
     buf.seek(0)
     buf.name = "chart.png"
     return buf
