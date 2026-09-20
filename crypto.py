@@ -1,455 +1,682 @@
 # -*- coding: utf-8 -*-
 """
-دستورهای «دلار»، «طلا» و «تتر»: قیمت لحظه‌ای هرکدوم، جدا از هم، به‌صورت عکس.
-هر عضو اسم یکی از این‌ها رو می‌نویسه و فقط قیمت همون یکی رو می‌بینه.
-هیچ جدول/گرید ترکیبی‌ای وجود نداره - هر سه کاملاً مستقل از هم کار می‌کنن.
+قابلیت‌های جدید ربات (فایل جدا، بدون دست‌زدن به بقیه‌ی کدها):
 
-نکته‌ی مهم درباره‌ی منبع داده:
-قبلاً قیمت رمزارزها از API نوبیتکس گرفته می‌شد، ولی چون نوبیتکس اخیراً هدف
-تحریم‌های مستقیم آمریکا قرار گرفته، سرورهای میزبانی خارج از ایران (مثل
-Railway) دیگه نمی‌تونن بهش وصل بشن. برای همین قیمت تتر از CoinGecko
-(بین‌المللی، رایگان، بدون محدودیت جغرافیایی) گرفته می‌شه. دلار و طلا
-مستقیماً از tgju میان.
+  ۱) آمار گروه
+       «آمار»        ← آمار امروزِ هر نفر (پیام، عکس، فیلم، گیف، استیکر، لینک)
+       «آمار کل»     ← آمار کل گروه از اولین روزی که ربات شروع به شمارش کرده
+       ریپلای روی یه نفر + «آمار» یا «آمار کل» ← فقط آمار همون نفر
+
+  ۲) تبدیل ارز
+       «۱۰۰ دلار»  /  «۵۰ تتر»  /  «۱۰۰ دلار به تومان»
+       «۵ میلیون تومان به دلار»  /  «۲۰۰۰۰۰۰ تومان به تتر»
+
+  ۳) نمودار قیمت
+       «نمودار دلار»  /  «نمودار طلا»  /  «نمودار تتر»
+       «نمودار دلار هفته»  /  «نمودار دلار ماه»
+
+نصب: تو فایل اصلی، بعد از ساختن application فقط این دو خط:
+       import extras
+       extras.register(application)
 """
 
+import asyncio
+import html
 import io
-import os
 import logging
-import requests
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import os
+import re
+import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
 
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
+from telegram.ext import ContextTypes, MessageHandler, filters
 
-import arabic_reshaper
-from bidi.algorithm import get_display
+import crypto as pc
+
+try:
+    from matplotlib.figure import Figure
+    from matplotlib import font_manager, ticker
+    from matplotlib import dates as mdates
+    import matplotlib
+    HAS_MPL = True
+except ImportError:  # نمودار کار نمی‌کنه، ولی بقیه‌ی قابلیت‌ها سالمن
+    HAS_MPL = False
 
 logger = logging.getLogger(__name__)
 
-COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
-TGJU_URL = "https://call4.tgju.org/ajax.json"
-
-USER_AGENT = "Mozilla/5.0 (compatible; TelegramBot/1.0; +https://core.telegram.org/bots)"
-
-# دلار و طلا رمزارز نیستن، برای همین از یه منبع عمومی دیگه (tgju) میان
-FIAT_GOLD_MAP = {
-    "دلار": ("price_dollar_rl", "💵", "dollar"),
-    "طلا": ("geram18", "🥇", "gold"),
-}
-
-# اسم فارسی -> (نماد کوتاه, ایموجی) — فقط تتر
-SYMBOL_MAP = {
-    "تتر": ("usdt", "💵"),
-}
-
-# نماد کوتاه -> آیدیِ همون کوین تو CoinGecko
-COINGECKO_IDS = {
-    "usdt": "tether",
-}
-
-# ترجمه اسم هر مورد به زبان‌های دیگه (برای نمایش داخل عکس)
-NAME_TRANSLATIONS = {
-    "usdt": {"fa": "تتر", "en": "Tether", "ar": "تيثر"},
-    "dollar": {"fa": "دلار", "en": "US Dollar", "ar": "الدولار الأمريكي"},
-    "gold": {"fa": "طلا (۱۸ عیار)", "en": "Gold (18k)", "ar": "الذهب (18 قيراط)"},
-}
-
-UI_STRINGS = {
-    "fa": {
-        "greeting": "سلام جوان ایرانی", "price_label": "قیمت لحظه‌ای", "currency": "تومان",
-        "change_suffix": "تغییر نسبت به دیروز", "updated": "بروزرسانی", "unknown": "نامشخص",
-    },
-    "en": {
-        "greeting": "Hello Iranian Youth", "price_label": "Live Price", "currency": "Toman",
-        "change_suffix": "change vs yesterday", "updated": "Updated", "unknown": "N/A",
-    },
-    "ar": {
-        "greeting": "مرحباً أيها الشاب الإيراني", "price_label": "السعر اللحظي", "currency": "تومان",
-        "change_suffix": "التغيير مقارنة بالأمس", "updated": "آخر تحديث", "unknown": "غير معروف",
-    },
-}
-
-LANG_NAMES = {"fa": "فارسی", "en": "English", "ar": "العربية"}
-
-# مدت زمان تا حذف خودکار پیام‌ها (ثانیه) — فقط تو پی‌وی ربات
-AUTO_DELETE_DELAY = 60
-
-
-def _tr_name(symbol, lang):
-    entry = NAME_TRANSLATIONS.get(symbol)
-    if not entry:
-        return symbol
-    return entry.get(lang, entry.get("fa", symbol))
-
-
-def _ui(lang, key):
-    return UI_STRINGS.get(lang, UI_STRINGS["fa"]).get(key, UI_STRINGS["fa"][key])
-
-FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "Vazirmatn-Bold.ttf")
-FALLBACK_FONT_PATH = os.path.join(os.path.dirname(__file__), "assets", "DejaVuSans-Bold.ttf")
-
-
-def _get_font(size):
-    if os.path.exists(FONT_PATH):
-        return ImageFont.truetype(FONT_PATH, size)
-    if os.path.exists(FALLBACK_FONT_PATH):
-        return ImageFont.truetype(FALLBACK_FONT_PATH, size)
-    return ImageFont.load_default()
-
-
-def _fa(text: str) -> str:
-    """متن فارسی رو برای نمایش درست (حروف چسبیده + جهت راست‌به‌چپ) روی عکس آماده می‌کنه"""
-    reshaped = arabic_reshaper.reshape(text)
-    return get_display(reshaped)
-
-
 # ---------------------------------------------------------------------------
-# دریافت داده: CoinGecko برای تتر، tgju برای نرخ دلار/طلا
+# تنظیمات
 # ---------------------------------------------------------------------------
 
-def fetch_coingecko_data():
-    """قیمت دلاریِ تتر رو از CoinGecko می‌گیره"""
-    ids = ",".join(sorted(set(COINGECKO_IDS.values())))
-    params = {
-        "ids": ids,
-        "vs_currencies": "usd",
-        "include_24hr_change": "true",
-    }
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(COINGECKO_URL, params=params, headers=headers, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+# مسیر دیتابیس. تو Railway حتماً یه Volume وصل کن و مثلاً STATS_DB_PATH=/data/stats.db بذار،
+# وگرنه با هر دیپلوی آمار پاک می‌شه.
+DB_PATH = os.environ.get("STATS_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "stats.db"))
 
+MAX_PEOPLE = 10                 # حداکثر تعداد نفرات تو لیست آمار گروه
+PRICE_SAMPLE_INTERVAL = 600     # هر چند ثانیه یه‌بار قیمت‌ها برای نمودار ذخیره بشن
+PRICE_KEEP_DAYS = 35            # قیمت‌های قدیمی‌تر از این پاک می‌شن
+RATE_CACHE_SECONDS = 45         # کش نرخ، برای اینکه با هر پیام به tgju/CoinGecko درخواست نره
 
-def get_price_toman(cg_data: dict, symbol: str, usd_to_toman):
-    """
-    قیمت یک رمزارز به تومان + درصد تغییر ۲۴ ساعته رو برمی‌گردونه.
-    usd_to_toman: نرخ لحظه‌ایِ هر دلار به تومان (از tgju)
-    """
-    cg_id = COINGECKO_IDS.get(symbol)
-    if not cg_id:
-        return None, None
-    entry = cg_data.get(cg_id)
-    if not entry:
-        return None, None
-    usd_price = entry.get("usd")
-    change = entry.get("usd_24h_change")
-    if usd_price is None or usd_to_toman is None:
-        return None, change
-    try:
-        price_toman = int(float(usd_price) * float(usd_to_toman))
-    except (TypeError, ValueError):
-        return None, change
-    return price_toman, change
+try:
+    from zoneinfo import ZoneInfo
+    TEHRAN = ZoneInfo("Asia/Tehran")
+except Exception:
+    TEHRAN = timezone(timedelta(hours=3, minutes=30))
 
+GROUP_TYPES = ("group", "supergroup")
 
-def fetch_tgju_data():
-    resp = requests.get(TGJU_URL, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("current", {})
-
-
-def get_fiat_gold_price(tgju_data: dict, key: str):
-    """قیمت دلار/طلا به تومان + درصد تغییر رو برمی‌گردونه، یا None اگه پیدا نشد"""
-    entry = tgju_data.get(key)
-    if not entry:
-        return None, None
-    try:
-        price_str = str(entry.get("p", "")).replace(",", "")
-        price_rial = float(price_str)
-        price_toman = int(price_rial / 10)
-    except (TypeError, ValueError):
-        return None, None
-    change = entry.get("dp") or entry.get("d")
-    try:
-        change = float(str(change).replace("%", "")) if change is not None else None
-    except (TypeError, ValueError):
-        change = None
-    return price_toman, change
-
-
-def get_usd_to_toman_rate(tgju_data: dict):
-    """نرخ لحظه‌ایِ هر دلار به تومان (برای تبدیل قیمت دلاریِ تتر)"""
-    rate, _ = get_fiat_gold_price(tgju_data, "price_dollar_rl")
-    return rate
-
-
-def _card_color(day_change):
-    try:
-        if day_change is not None and float(day_change) < 0:
-            return (255, 90, 90)  # قرمز برای منفی
-    except (TypeError, ValueError):
-        pass
-    return (90, 200, 130)  # سبز برای مثبت یا نامشخص
-
-
-COIN_COLORS = {
-    "usdt": (38, 161, 123),
-    "dollar": (90, 160, 230),
-    "gold": (222, 180, 90),
+FIELDS = ("messages", "photos", "videos", "gifs", "stickers", "links")
+ICONS = {
+    "messages": "💬", "photos": "🖼", "videos": "🎬",
+    "gifs": "🎞", "stickers": "🎭", "links": "🔗",
+}
+LABELS = {
+    "messages": "پیام", "photos": "عکس", "videos": "فیلم",
+    "gifs": "گیف", "stickers": "استیکر", "links": "لینک",
 }
 
+# ---------------------------------------------------------------------------
+# ابزارهای متنی: ارقام فارسی، تاریخ شمسی، نرمال‌سازی
+# ---------------------------------------------------------------------------
 
-def _coin_color(symbol):
-    return COIN_COLORS.get(symbol, (147, 51, 234))
-
-
-def _vertical_gradient(width, height, top_color, bottom_color):
-    img = Image.new("RGB", (width, height), top_color)
-    draw = ImageDraw.Draw(img)
-    for y in range(height):
-        t = y / height
-        r = int(top_color[0] + (bottom_color[0] - top_color[0]) * t)
-        g = int(top_color[1] + (bottom_color[1] - top_color[1]) * t)
-        b = int(top_color[2] + (bottom_color[2] - top_color[2]) * t)
-        draw.line([(0, y), (width, y)], fill=(r, g, b))
-    return img
+_TO_FA = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+_TO_EN = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
 
-BG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.jpg")
-BG_VIDEO_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.mp4")
-
-# بعد از اولین آپلود موفق ویدیوی پس‌زمینه، file_id اش اینجا کش می‌شه تا
-# دفعات بعد به‌جای آپلود دوباره‌ی کل فایل، فقط همون file_id فرستاده بشه (سریع و کم‌مصرف)
-_cached_video_file_id = None
+def p(x) -> str:
+    """هر عدد/متنی رو با ارقام فارسی برمی‌گردونه"""
+    return str(x).translate(_TO_FA)
 
 
-def _load_background(width, height):
-    """پس‌زمینه واقعی رو می‌گیره، برش می‌زنه که کامل قاب رو پر کنه، و کمی تیره‌ترش می‌کنه"""
-    if not os.path.exists(BG_IMAGE_PATH):
-        return _vertical_gradient(width, height, (18, 10, 34), (6, 4, 14))
+def fmt_int(n) -> str:
+    return p(f"{int(round(n)):,}").replace(",", "٬")
 
-    bg = Image.open(BG_IMAGE_PATH).convert("RGB")
-    src_w, src_h = bg.size
-    target_ratio = width / height
-    src_ratio = src_w / src_h
-    if src_ratio > target_ratio:
-        new_w = int(src_h * target_ratio)
-        left = (src_w - new_w) // 2
-        bg = bg.crop((left, 0, left + new_w, src_h))
+
+def fmt_num(v: float, decimals: int = 2) -> str:
+    if float(v).is_integer():
+        return fmt_int(v)
+    return p(f"{v:,.{decimals}f}").replace(",", "٬").replace(".", "٫")
+
+
+def gregorian_to_jalali(gy, gm, gd):
+    g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+    gy2 = gy + 1 if gm > 2 else gy
+    days = (355666 + (365 * gy) + ((gy2 + 3) // 4) - ((gy2 + 99) // 100)
+            + ((gy2 + 399) // 400) + gd + g_d_m[gm - 1])
+    jy = -1595 + (33 * (days // 12053))
+    days %= 12053
+    jy += 4 * (days // 1461)
+    days %= 1461
+    if days > 365:
+        jy += (days - 1) // 365
+        days = (days - 1) % 365
+    if days < 186:
+        jm = 1 + (days // 31)
+        jd = 1 + (days % 31)
     else:
-        new_h = int(src_w / target_ratio)
-        top = (src_h - new_h) // 3  # کمی از بالا برش بخوره که کوین‌ها بمونن
-        bg = bg.crop((0, top, src_w, top + new_h))
-    bg = bg.resize((width, height), Image.LANCZOS)
-
-    # یه لایه تیره‌ی نیمه‌شفاف رو کل عکس، که متن روش خواناتر بشه
-    overlay = Image.new("RGBA", (width, height), (8, 4, 18, 110))
-    bg = Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
-    return bg
+        jm = 7 + ((days - 186) // 30)
+        jd = 1 + ((days - 186) % 30)
+    return jy, jm, jd
 
 
-def _glass_panel(img, x0, y0, x1, y1, radius=32, blur=14, white_mix=0.06):
-    """
-    افکت شیشه‌ی مات واقعی (مثل پنل‌های iOS): همون قسمت از پس‌زمینه رو
-    بلور می‌کنه، یه‌کم سفید باهاش قاطی می‌کنه (حس شیشه‌ی مه‌گرفته)،
-    و با یه ماسک گردشده جاش می‌ذاره. بدون خط دور، بدون کادر اضافه.
-    """
-    x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
-    region = img.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(blur))
-    white_layer = Image.new("RGB", region.size, (255, 255, 255))
-    region = Image.blend(region, white_layer, white_mix)
-
-    mask = Image.new("L", region.size, 0)
-    mdraw = ImageDraw.Draw(mask)
-    mdraw.rounded_rectangle([0, 0, region.size[0] - 1, region.size[1] - 1], radius=radius, fill=255)
-
-    img = img.copy()
-    img.paste(region, (x0, y0), mask)
-    return img
+def jalali_from_iso(iso_day: str) -> str:
+    y, m, d = (int(x) for x in iso_day.split("-"))
+    jy, jm, jd = gregorian_to_jalali(y, m, d)
+    return p(f"{jy}/{jm:02d}/{jd:02d}")
 
 
-def render_single_card(symbol: str, price, change, lang: str = "fa", extra_info=None) -> Image.Image:
-    width, height = 1200, 675  # نسبت دقیق 16:9
-    gold = (235, 180, 90)  # طلایی/کهربایی هماهنگ با پس‌زمینه
-    name = _tr_name(symbol, lang)
+def _norm(text: str) -> str:
+    """متن پیام رو برای تطبیق دستورها یکدست می‌کنه (ارقام، ی/ک عربی، نیم‌فاصله، ...)"""
+    t = text.translate(_TO_EN)
+    t = t.replace("ي", "ی").replace("ك", "ک")
+    t = t.replace("\u200c", " ").replace("\u200f", "").replace("\u200e", "")
+    t = re.sub(r"(?<=\d)[,،٬](?=\d)", "", t)
+    t = t.replace("٫", ".")
+    t = re.sub(r"[!؟?.]+$", "", t.strip())
+    return re.sub(r"\s+", " ", t).strip()
 
-    img = _load_background(width, height)
 
-    # پنل شیشه‌ای مات (بدون خط دور، بدون گوشه‌های تزئینی)
-    panel_margin = 70
-    img = _glass_panel(img, panel_margin, panel_margin, width - panel_margin, height - panel_margin)
-    draw = ImageDraw.Draw(img)
+# ---------------------------------------------------------------------------
+# دیتابیس
+# ---------------------------------------------------------------------------
 
-    greeting_font = _get_font(24)
-    name_font = _get_font(54)
-    price_label_font = _get_font(24)
-    price_font = _get_font(72)
-    change_font = _get_font(30)
-    footer_font = _get_font(20)
-    detail_font = _get_font(22)
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS daily_stats (
+    chat_id  INTEGER NOT NULL,
+    user_id  INTEGER NOT NULL,
+    day      TEXT    NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    photos   INTEGER NOT NULL DEFAULT 0,
+    videos   INTEGER NOT NULL DEFAULT 0,
+    gifs     INTEGER NOT NULL DEFAULT 0,
+    stickers INTEGER NOT NULL DEFAULT 0,
+    links    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (chat_id, user_id, day)
+);
+CREATE TABLE IF NOT EXISTS users (
+    chat_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    name    TEXT    NOT NULL,
+    PRIMARY KEY (chat_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS price_history (
+    symbol TEXT    NOT NULL,
+    ts     INTEGER NOT NULL,
+    price  REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_price_history ON price_history (symbol, ts);
+"""
 
-    greeting_text = _fa(_ui(lang, "greeting"))
-    gw = draw.textlength(greeting_text, font=greeting_font)
-    draw.text(((width - gw) / 2, 118), greeting_text, font=greeting_font, fill=(235, 225, 210))
+_conn = None
 
-    name_text = _fa(name)
-    nw = draw.textlength(name_text, font=name_font)
-    draw.text(((width - nw) / 2, 168), name_text, font=name_font, fill=(255, 255, 255))
 
-    price_label = _fa(_ui(lang, "price_label"))
-    plw = draw.textlength(price_label, font=price_label_font)
-    draw.text(((width - plw) / 2, 272), price_label, font=price_label_font, fill=(225, 210, 190))
-
-    currency = _ui(lang, "currency")
-    price_text = _fa(f"{price:,} {currency}") if price is not None else _fa(_ui(lang, "unknown"))
-    pw = draw.textlength(price_text, font=price_font)
-    draw.text(((width - pw) / 2, 306), price_text, font=price_font, fill=gold)
-
-    y_cursor = 400
-    color = _card_color(change)
-    if change is not None:
+def _db() -> sqlite3.Connection:
+    global _conn
+    if _conn is None:
+        folder = os.path.dirname(DB_PATH)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         try:
-            change_val = float(change)
-            sign = "+" if change_val >= 0 else ""
-            change_text = _fa(f"{sign}{change_val:.2f}٪ {_ui(lang, 'change_suffix')}")
-            cw = draw.textlength(change_text, font=change_font)
-            draw.text(((width - cw) / 2, y_cursor), change_text, font=change_font, fill=color)
-            y_cursor += 48
-        except (TypeError, ValueError):
+            _conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.DatabaseError:
             pass
-
-    if extra_info:
-        for line in extra_info:
-            line_text = _fa(line)
-            lw = draw.textlength(line_text, font=detail_font)
-            draw.text(((width - lw) / 2, y_cursor), line_text, font=detail_font, fill=(210, 205, 220))
-            y_cursor += 34
-
-    from persian_date import format_persian_datetime
-    footer_text = _fa(f"{_ui(lang, 'updated')}: {format_persian_datetime()}")
-    fw = draw.textlength(footer_text, font=footer_font)
-    draw.text(((width - fw) / 2, height - panel_margin - 44), footer_text, font=footer_font, fill=(220, 205, 180))
-
-    return img
+        _conn.executescript(_SCHEMA)
+        _conn.commit()
+    return _conn
 
 
-def _image_to_bytes(img: Image.Image) -> io.BytesIO:
+def _today_iso() -> str:
+    return datetime.now(TEHRAN).strftime("%Y-%m-%d")
+
+
+def add_counts(chat_id: int, user_id: int, name: str, counts: dict, day: str = None):
+    day = day or _today_iso()
+    db = _db()
+    with db:
+        db.execute(
+            """INSERT INTO daily_stats (chat_id, user_id, day, messages, photos, videos, gifs, stickers, links)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(chat_id, user_id, day) DO UPDATE SET
+                 messages = messages + excluded.messages,
+                 photos   = photos   + excluded.photos,
+                 videos   = videos   + excluded.videos,
+                 gifs     = gifs     + excluded.gifs,
+                 stickers = stickers + excluded.stickers,
+                 links    = links    + excluded.links""",
+            (chat_id, user_id, day, *[counts[f] for f in FIELDS]),
+        )
+        db.execute(
+            """INSERT INTO users (chat_id, user_id, name) VALUES (?, ?, ?)
+               ON CONFLICT(chat_id, user_id) DO UPDATE SET name = excluded.name""",
+            (chat_id, user_id, name),
+        )
+
+
+def query_people(chat_id: int, day: str = None):
+    """لیست آمار همه‌ی افراد گروه (مرتب‌شده بر اساس تعداد پیام). day=None یعنی کل زمان."""
+    sql = """
+        SELECT d.user_id, COALESCE(u.name, '؟'),
+               SUM(d.messages), SUM(d.photos), SUM(d.videos),
+               SUM(d.gifs), SUM(d.stickers), SUM(d.links)
+        FROM daily_stats d
+        LEFT JOIN users u ON u.chat_id = d.chat_id AND u.user_id = d.user_id
+        WHERE d.chat_id = ?"""
+    args = [chat_id]
+    if day:
+        sql += " AND d.day = ?"
+        args.append(day)
+    sql += " GROUP BY d.user_id ORDER BY SUM(d.messages) DESC, d.user_id"
+    rows = []
+    for r in _db().execute(sql, args).fetchall():
+        item = {"user_id": r[0], "name": r[1]}
+        item.update(dict(zip(FIELDS, r[2:])))
+        rows.append(item)
+    return rows
+
+
+def query_since(chat_id: int):
+    r = _db().execute("SELECT MIN(day) FROM daily_stats WHERE chat_id = ?", (chat_id,)).fetchone()
+    return r[0] if r else None
+
+
+# ---------------------------------------------------------------------------
+# شمارش پیام‌ها
+# ---------------------------------------------------------------------------
+
+def classify_message(m) -> dict:
+    counts = dict.fromkeys(FIELDS, 0)
+    counts["messages"] = 1
+    if m.sticker:
+        counts["stickers"] = 1
+    elif m.animation:          # گیف؛ باید قبل از document/video چک بشه
+        counts["gifs"] = 1
+    elif m.video or m.video_note:
+        counts["videos"] = 1
+    elif m.photo:
+        counts["photos"] = 1
+    entities = list(m.entities or []) + list(m.caption_entities or [])
+    counts["links"] = sum(1 for e in entities if e.type in ("url", "text_link"))
+    return counts
+
+
+async def count_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if not m or not user or not chat or user.is_bot:
+        return
+    if chat.type not in GROUP_TYPES:
+        return
+    try:
+        name = (user.full_name or user.username or "بدون‌نام").strip()[:30]
+        add_counts(chat.id, user.id, name, classify_message(m))
+    except Exception as e:
+        logger.warning(f"ثبت آمار ناموفق بود: {e}")
+
+
+# ---------------------------------------------------------------------------
+# ساخت متن آمار
+# ---------------------------------------------------------------------------
+
+_RANKS = ["🥇", "🥈", "🥉"]
+_SEP = "┈┈┈┈┈┈┈┈┈┈┈┈┈┈"
+_LEGEND = "  ·  ".join(f"{ICONS[f]} {LABELS[f]}" for f in FIELDS)
+
+
+def _compact_line(row: dict) -> str:
+    parts = [f"💬 {fmt_int(row['messages'])}"]
+    for f in FIELDS[1:]:
+        if row[f]:
+            parts.append(f"{ICONS[f]} {fmt_int(row[f])}")
+    return "  ·  ".join(parts)
+
+
+def build_group_text(rows, total_mode: bool, since_iso: str = None) -> str:
+    if total_mode:
+        title = "آمار کل گروه"
+        sub = f"🗓 از {jalali_from_iso(since_iso)} تا امروز" if since_iso else ""
+        empty = "📭 هنوز آماری ثبت نشده."
+    else:
+        title = "آمار امروز گروه"
+        sub = f"📅 {jalali_from_iso(_today_iso())}"
+        empty = "📭 امروز هنوز پیامی ثبت نشده."
+
+    if not rows:
+        return f"📊 <b>{title}</b>\n\n{empty}"
+
+    lines = [f"📊 <b>{title}</b>"]
+    if sub:
+        lines.append(sub)
+    lines.append("")
+
+    for i, row in enumerate(rows[:MAX_PEOPLE]):
+        rank = _RANKS[i] if i < 3 else f"{p(i + 1)}."
+        lines.append(f"{rank} <b>{html.escape(row['name'])}</b>")
+        lines.append(_compact_line(row))
+        lines.append("")
+
+    hidden = len(rows) - MAX_PEOPLE
+    if hidden > 0:
+        lines.append(f"… و {p(hidden)} نفر دیگه")
+        lines.append("")
+
+    totals = {f: sum(r[f] for r in rows) for f in FIELDS}
+    lines.append(_SEP)
+    lines.append(f"👥 مجموع {p(len(rows))} نفر")
+    lines.append(_compact_line(totals))
+    lines.append("")
+    lines.append(f"<i>{_LEGEND}</i>")
+    return "\n".join(lines)
+
+
+def build_person_text(name: str, row, total_mode: bool, since_iso: str = None) -> str:
+    if total_mode:
+        label = "آمار کل"
+        if since_iso:
+            label += f" · از {jalali_from_iso(since_iso)}"
+    else:
+        label = f"آمار امروز · {jalali_from_iso(_today_iso())}"
+
+    lines = [f"👤 <b>{html.escape(name)}</b>", f"📅 {label}", ""]
+    if not row:
+        lines.append("📭 هنوز چیزی از این نفر ثبت نشده.")
+        return "\n".join(lines)
+    for f in FIELDS:
+        lines.append(f"{ICONS[f]} {LABELS[f]}: <b>{fmt_int(row[f])}</b>")
+    return "\n".join(lines)
+
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE, total_mode: bool):
+    msg = update.effective_message
+    chat = update.effective_chat
+    if not chat or chat.type not in GROUP_TYPES:
+        return
+
+    day = None if total_mode else _today_iso()
+    rows = query_people(chat.id, day)
+    since = query_since(chat.id) if total_mode else None
+
+    target = msg.reply_to_message.from_user if msg.reply_to_message else None
+    if target and not target.is_bot:
+        row = next((r for r in rows if r["user_id"] == target.id), None)
+        name = (target.full_name or target.username or "بدون‌نام").strip()[:30]
+        text = build_person_text(name, row, total_mode, since)
+    else:
+        text = build_group_text(rows, total_mode, since)
+
+    await msg.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+# ---------------------------------------------------------------------------
+# نرخ‌ها (با کش) و ذخیره‌ی تاریخچه برای نمودار
+# ---------------------------------------------------------------------------
+
+_rate_cache = {}  # symbol -> (زمان, قیمت به تومان)
+
+
+def _fetch_prices_blocking(want) -> dict:
+    """قیمت دلار/طلا (tgju) و تتر (CoinGecko × نرخ دلار) رو به تومان برمی‌گردونه"""
+    out = {}
+    tgju = pc.fetch_tgju_data()
+    usd_toman = pc.get_usd_to_toman_rate(tgju)
+    if "dollar" in want:
+        out["dollar"] = usd_toman
+    if "gold" in want:
+        out["gold"], _ = pc.get_fiat_gold_price(tgju, "geram18")
+    if "usdt" in want:
+        try:
+            cg = pc.fetch_coingecko_data()
+            out["usdt"], _ = pc.get_price_toman(cg, "usdt", usd_toman)
+        except Exception as e:
+            logger.warning(f"دریافت قیمت تتر از CoinGecko ناموفق بود: {e}")
+            out["usdt"] = None
+    now = time.time()
+    for k, v in out.items():
+        if v:
+            _rate_cache[k] = (now, v)
+    return out
+
+
+async def get_rate(symbol: str):
+    hit = _rate_cache.get(symbol)
+    if hit and time.time() - hit[0] < RATE_CACHE_SECONDS:
+        return hit[1]
+    try:
+        prices = await asyncio.to_thread(_fetch_prices_blocking, {symbol})
+    except Exception as e:
+        logger.warning(f"دریافت نرخ ناموفق بود: {e}")
+        return None
+    return prices.get(symbol)
+
+
+async def record_prices_job(context: ContextTypes.DEFAULT_TYPE):
+    """هر چند دقیقه یه‌بار قیمت‌ها رو ذخیره می‌کنه؛ نمودار از همین داده‌ها ساخته می‌شه"""
+    try:
+        prices = await asyncio.to_thread(_fetch_prices_blocking, {"dollar", "gold", "usdt"})
+    except Exception as e:
+        logger.warning(f"ذخیره‌ی قیمت ناموفق بود: {e}")
+        return
+    now = int(time.time())
+    db = _db()
+    with db:
+        for symbol, price in prices.items():
+            if price:
+                db.execute("INSERT INTO price_history (symbol, ts, price) VALUES (?, ?, ?)",
+                           (symbol, now, float(price)))
+        db.execute("DELETE FROM price_history WHERE ts < ?", (now - PRICE_KEEP_DAYS * 86400,))
+
+
+# ---------------------------------------------------------------------------
+# تبدیل ارز
+# ---------------------------------------------------------------------------
+
+_AMOUNT = r"(\d+(?:\.\d+)?)(?: (هزار|میلیون|میلیارد))?"
+_TO_TOMAN_RE = re.compile(rf"^{_AMOUNT} (دلار|تتر)(?: به تومان)?$")
+_FROM_TOMAN_RE = re.compile(rf"^{_AMOUNT} تومان(?: به| در)? (دلار|تتر)$")
+_MULT = {None: 1, "هزار": 1_000, "میلیون": 1_000_000, "میلیارد": 1_000_000_000}
+_CUR = {"دلار": ("dollar", "💵"), "تتر": ("usdt", "🪙")}
+_MAX_AMOUNT = 1e13
+
+
+def parse_conversion(text: str):
+    """(جهت، مقدار، نام ارز) یا None. جهت: 'to_toman' یا 'from_toman'"""
+    m = _TO_TOMAN_RE.match(text)
+    if m:
+        return "to_toman", float(m.group(1)) * _MULT[m.group(2)], m.group(3)
+    m = _FROM_TOMAN_RE.match(text)
+    if m:
+        return "from_toman", float(m.group(1)) * _MULT[m.group(2)], m.group(3)
+    return None
+
+
+async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE, parsed):
+    msg = update.effective_message
+    chat = update.effective_chat
+    direction, amount, cur_name = parsed
+    symbol, emoji = _CUR[cur_name]
+
+    if amount <= 0 or amount > _MAX_AMOUNT:
+        return
+
+    rate = await get_rate(symbol)
+    if not rate:
+        sent = await msg.reply_text("❌ نتونستم نرخ رو بگیرم، چند لحظه‌ی دیگه دوباره امتحان کن.")
+        pc._schedule_auto_delete(context, chat, [sent.message_id, msg.message_id])
+        return
+
+    if direction == "to_toman":
+        head = f"{emoji} {fmt_num(amount)} {cur_name}"
+        result = f"{fmt_int(amount * rate)} تومان"
+    else:
+        head = f"💰 {fmt_int(amount)} تومان"
+        result = f"{fmt_num(amount / rate)} {cur_name}"
+
+    text = (
+        f"<b>{head}</b>\n\n"
+        f"↔️ حدوداً <b>{result}</b>\n\n"
+        f"📌 نرخ هر {cur_name}: {fmt_int(rate)} تومان"
+    )
+    sent = await msg.reply_text(text, parse_mode=ParseMode.HTML)
+    pc._schedule_auto_delete(context, chat, [sent.message_id, msg.message_id])
+
+
+# ---------------------------------------------------------------------------
+# نمودار
+# ---------------------------------------------------------------------------
+
+_CHART_RE = re.compile(r"^نمودار (دلار|طلا|تتر)(?: (امروز|روز|هفته|هفتگی|ماه|ماهانه))?$")
+_CHART_SYMBOL = {"دلار": "dollar", "طلا": "gold", "تتر": "usdt"}
+_CHART_PERIOD = {
+    None: (1, "۲۴ ساعت اخیر"), "امروز": (1, "۲۴ ساعت اخیر"), "روز": (1, "۲۴ ساعت اخیر"),
+    "هفته": (7, "۷ روز اخیر"), "هفتگی": (7, "۷ روز اخیر"),
+    "ماه": (30, "۳۰ روز اخیر"), "ماهانه": (30, "۳۰ روز اخیر"),
+}
+
+_font_ready = False
+
+
+def _setup_font():
+    global _font_ready
+    if _font_ready or not HAS_MPL:
+        return
+    _font_ready = True
+    if os.path.exists(pc.FONT_PATH):
+        try:
+            font_manager.fontManager.addfont(pc.FONT_PATH)
+            name = font_manager.FontProperties(fname=pc.FONT_PATH).get_name()
+            matplotlib.rcParams["font.family"] = name
+        except Exception as e:
+            logger.warning(f"لود فونت نمودار ناموفق بود: {e}")
+
+
+def render_chart(symbol: str, rows, period_days: int, period_label: str) -> io.BytesIO:
+    _setup_font()
+
+    # اگه نقطه‌ها خیلی زیاد بود، کم‌شون می‌کنیم که نمودار سنگین نشه
+    if len(rows) > 700:
+        step = len(rows) // 700 + 1
+        rows = rows[::step] + [rows[-1]]
+
+    times = [datetime.fromtimestamp(ts, TEHRAN) for ts, _ in rows]
+    prices = [pr for _, pr in rows]
+    lo, hi = min(prices), max(prices)
+    pad = (hi - lo) * 0.18 or hi * 0.01
+    y_lo, y_hi = lo - pad, hi + pad
+
+    color = tuple(c / 255 for c in pc._coin_color(symbol))
+    bg = "#140c24"
+    soft = "#e6dccb"
+
+    fig = Figure(figsize=(12, 6.75), dpi=100, facecolor=bg)
+    ax = fig.add_axes([0.10, 0.10, 0.87, 0.60], facecolor=bg)
+
+    ax.plot(times, prices, color=color, linewidth=2.8, solid_capstyle="round")
+    ax.fill_between(times, prices, y_lo, color=color, alpha=0.15)
+    ax.scatter([times[-1]], [prices[-1]], color=color, s=70, zorder=5)
+    ax.set_ylim(y_lo, y_hi)
+    ax.margins(x=0.02)
+
+    ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda v, _: f"{v:,.0f}"))
+    if period_days <= 1:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=TEHRAN))
+    else:
+        def _jal(v, _):
+            d = mdates.num2date(v, tz=TEHRAN)
+            _, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
+            return f"{jm:02d}/{jd:02d}"
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(_jal))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=7, tz=TEHRAN))
+
+    ax.tick_params(colors="#bdb3c9", labelsize=12, length=0)
+    ax.grid(True, color="white", alpha=0.07, linewidth=1)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    first, last = prices[0], prices[-1]
+    change = (last - first) / first * 100 if first else 0.0
+    change_color = "#5ac882" if change >= 0 else "#ff5a5a"
+    sign = "+" if change >= 0 else ""
+
+    name = pc._tr_name(symbol, "fa")
+    fig.text(0.5, 0.925, pc._fa(name), ha="center", va="center", fontsize=32, color="white")
+    fig.text(0.5, 0.868, pc._fa(period_label), ha="center", va="center", fontsize=16, color=soft)
+    fig.text(0.5, 0.805, pc._fa(f"{int(last):,} تومان"), ha="center", va="center",
+             fontsize=26, color=color)
+    fig.text(0.5, 0.748, pc._fa(f"{sign}{change:.2f}٪"), ha="center", va="center",
+             fontsize=17, color=change_color)
+
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    fig.savefig(buf, format="png", facecolor=bg)
     buf.seek(0)
-    buf.name = "price.png"
+    buf.name = "chart.png"
     return buf
 
 
-
-def _build_caption(symbol, price, change, lang="fa"):
-    name = _tr_name(symbol, lang)
-    currency = _ui(lang, "currency")
-    if price is None:
-        price_str = _ui(lang, "unknown")
-    else:
-        price_str = f"{price:,} {currency}"
-
-    if lang == "en":
-        text = f"{name} today: {price_str}"
-    elif lang == "ar":
-        text = f"{name} اليوم: {price_str}"
-    else:
-        text = f"{name} امروز {price_str}"
-
-    if change is not None:
-        try:
-            change_val = float(change)
-            sign = "+" if change_val >= 0 else ""
-            text += f" ({sign}{change_val:.2f}٪)"
-        except (TypeError, ValueError):
-            pass
-    return text
-
-
-async def _auto_delete_price_message(context: ContextTypes.DEFAULT_TYPE):
-    """بعد از زمان مشخص، همه‌ی پیام‌های لیست‌شده (پیام کاربر + جواب ربات) رو پاک می‌کنه"""
-    job = context.job
-    for message_id in job.data:
-        try:
-            await context.bot.delete_message(chat_id=job.chat_id, message_id=message_id)
-        except Exception:
-            pass
-
-
-def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_ids, delay: int = AUTO_DELETE_DELAY):
-    """فقط تو پی‌وی ربات: حذف خودکار پیام‌ها رو بعد از delay ثانیه زمان‌بندی می‌کنه"""
-    if not chat or chat.type != "private":
-        return
-    if not context.job_queue:
-        return
-    context.job_queue.run_once(
-        _auto_delete_price_message, delay, chat_id=chat.id, data=list(message_ids)
-    )
-
-
-async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE, chat, symbol, price, change, lang, caption):
-    """
-    اگه ویدیوی پس‌زمینه (assets/price_card_bg.mp4) وجود داشت، همونو با کپشن
-    قیمت می‌فرسته (و file_id اش رو کش می‌کنه تا دفعات بعد سریع‌تر باشه).
-    در غیر این صورت، مثل قبل یه عکس با متن قیمت روش می‌سازه و می‌فرسته.
-    """
-    global _cached_video_file_id
-    message = update.effective_message
-    sent = None
-
-    if os.path.exists(BG_VIDEO_PATH):
-        try:
-            if _cached_video_file_id:
-                sent = await message.reply_video(video=_cached_video_file_id, caption=caption)
-            else:
-                with open(BG_VIDEO_PATH, "rb") as f:
-                    sent = await message.reply_video(video=f, caption=caption)
-                if sent and sent.video:
-                    _cached_video_file_id = sent.video.file_id
-        except Exception as e:
-            logger.warning(f"ارسال ویدیوی پس‌زمینه ناموفق بود، برگشت به عکس: {e}")
-            sent = None
-
-    if sent is None:
-        img = render_single_card(symbol, price, change, lang=lang)
-        sent = await message.reply_photo(photo=_image_to_bytes(img), caption=caption)
-
-    # فقط تو پی‌وی: بعد از ۶۰ ثانیه هم پیام کاربر و هم جواب ربات پاک می‌شن
-    _schedule_auto_delete(context, chat, [sent.message_id, message.message_id])
-
-
-async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import database as db
-    text = (update.effective_message.text or "").strip()
+async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE, fa_symbol: str, fa_period):
+    msg = update.effective_message
     chat = update.effective_chat
-    lang = db.get_image_lang(chat.id) if chat and chat.type in ("group", "supergroup") else "fa"
+    symbol = _CHART_SYMBOL[fa_symbol]
+    days, label = _CHART_PERIOD[fa_period]
 
-    if text in FIAT_GOLD_MAP:
-        key, emoji, trans_key = FIAT_GOLD_MAP[text]
-        try:
-            tgju_data = fetch_tgju_data()
-        except Exception as e:
-            await update.effective_message.reply_text(f"❌ نتونستم قیمت {text} رو بگیرم.\n{e}")
-            return
-        price, change = get_fiat_gold_price(tgju_data, key)
-        caption = _build_caption(trans_key, price, change, lang=lang)
-        await _send_price_result(update, context, chat, trans_key, price, change, lang, caption)
+    async def _reply_and_clean(text):
+        sent = await msg.reply_text(text)
+        pc._schedule_auto_delete(context, chat, [sent.message_id, msg.message_id])
+
+    if not HAS_MPL:
+        await _reply_and_clean("❌ کتابخونه‌ی matplotlib نصب نیست، نمودار کار نمی‌کنه.")
         return
 
-    match = SYMBOL_MAP.get(text)
-    if not match:
+    since_ts = int(time.time()) - days * 86400
+    rows = _db().execute(
+        "SELECT ts, price FROM price_history WHERE symbol = ? AND ts >= ? ORDER BY ts",
+        (symbol, since_ts),
+    ).fetchall()
+
+    if len(rows) < 3:
+        await _reply_and_clean("⏳ هنوز داده‌ی کافی برای نمودار جمع نشده، چند دقیقه‌ی دیگه دوباره امتحان کن.")
         return
-    symbol, emoji = match
 
     try:
-        try:
-            tgju_data = fetch_tgju_data()
-            usd_toman = get_usd_to_toman_rate(tgju_data)
-        except Exception as e:
-            await update.effective_message.reply_text(f"❌ نتونستم نرخ دلار رو بگیرم (لازم برای تبدیل قیمت به تومان).\n{e}")
-            return
-
-        try:
-            cg_data = fetch_coingecko_data()
-        except Exception as e:
-            await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
-            return
-
-        price, change = get_price_toman(cg_data, symbol, usd_toman)
-        caption = _build_caption(symbol, price, change, lang=lang)
-        await _send_price_result(update, context, chat, symbol, price, change, lang, caption)
+        buf = await asyncio.to_thread(render_chart, symbol, rows, days, label)
     except Exception as e:
-        await update.effective_message.reply_text(f"❌ خطای غیرمنتظره تو ساختن قیمت {text}.\n{e}")
+        logger.exception("ساخت نمودار ناموفق بود")
+        await _reply_and_clean(f"❌ نتونستم نمودار رو بسازم.\n{e}")
+        return
+
+    name = pc._tr_name(symbol, "fa")
+    caption = f"📈 نمودار {name} · {label}\n💰 آخرین قیمت: {fmt_int(rows[-1][1])} تومان"
+
+    # اگه داده‌ی جمع‌شده از بازه‌ی خواسته‌شده کمتره، صادقانه بگیم
+    covered_hours = (rows[-1][0] - rows[0][0]) / 3600
+    if covered_hours < days * 24 * 0.9:
+        if covered_hours < 48:
+            caption += f"\n\n📌 فعلاً فقط داده‌ی {p(int(covered_hours) or 1)} ساعت اخیر ثبت شده."
+        else:
+            caption += f"\n\n📌 فعلاً فقط داده‌ی {p(int(covered_hours // 24))} روز اخیر ثبت شده."
+
+    sent = await msg.reply_photo(photo=buf, caption=caption)
+    pc._schedule_auto_delete(context, chat, [sent.message_id, msg.message_id])
+
+
+# ---------------------------------------------------------------------------
+# مسیریابی پیام‌های متنی
+# ---------------------------------------------------------------------------
+
+_STATS_TODAY = {"آمار", "امار"}
+_STATS_TOTAL = {"آمار کل", "امار کل"}
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    if not msg or not msg.text or len(msg.text) > 80:
+        return
+    text = _norm(msg.text)
+
+    if text in _STATS_TODAY:
+        await cmd_stats(update, context, total_mode=False)
+        return
+    if text in _STATS_TOTAL:
+        await cmd_stats(update, context, total_mode=True)
+        return
+
+    m = _CHART_RE.match(text)
+    if m:
+        await cmd_chart(update, context, m.group(1), m.group(2))
+        return
+
+    parsed = parse_conversion(text)
+    if parsed:
+        await cmd_convert(update, context, parsed)
+
+
+# ---------------------------------------------------------------------------
+# نصب روی ربات
+# ---------------------------------------------------------------------------
+
+def register(application):
+    """تو فایل اصلی، بعد از ساختن application صدا بزن: extras.register(application)"""
+    _db()  # ساخت جدول‌ها
+
+    # شمارش تو گروه -1 (همیشه اجرا می‌شه، حتی اگه هندلر دیگه‌ای پیام رو بگیره)
+    application.add_handler(
+        MessageHandler(
+            filters.UpdateType.MESSAGE & filters.ChatType.GROUPS & ~filters.StatusUpdate.ALL,
+            count_message,
+        ),
+        group=-1,
+    )
+    # دستورها تو گروه 1 (کنار هندلرهای قبلی تداخل نمی‌کنه)
+    application.add_handler(
+        MessageHandler(filters.UpdateType.MESSAGE & filters.TEXT & ~filters.COMMAND, handle_text),
+        group=1,
+    )
+
+    if application.job_queue:
+        application.job_queue.run_repeating(record_prices_job, interval=PRICE_SAMPLE_INTERVAL, first=15)
+    else:
+        logger.warning("job_queue نصب نیست؛ قیمت‌ها برای نمودار ذخیره نمی‌شن. "
+                       "python-telegram-bot[job-queue] رو نصب کن.")
