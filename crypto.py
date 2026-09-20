@@ -327,52 +327,68 @@ def render_single_card(symbol: str, price, change, lang: str = "fa", extra_info=
     return img
 
 
-def render_video_price_overlay(symbol: str, price, change, lang: str = "fa") -> Image.Image:
+def render_video_price_overlay(symbol: str, price, change, lang: str = "fa",
+                                width: int = 1200, height: int = 675) -> Image.Image:
     """
     مثل render_single_card ولی بدون پس‌زمینه (کاملاً شفاف/RGBA)، فقط پنل+متن.
     این تصویر بعداً با ffmpeg روی فریم‌های ویدیو overlay می‌شه.
+
+    width/height: ابعاد دقیق ویدیویی که overlay قراره روش گذاشته بشه (هر
+    عرض/ارتفاعی که کاربر آپلود کنه). همه‌ی فونت‌ها و فاصله‌ها نسبت به یه
+    طرح پایه‌ی 1200x675 مقیاس داده می‌شن، تا روی هر نسبت تصویری (افقی،
+    عمودی، مربعی و...) درست و بدون کشیدگی/برش نمایش داده بشه.
     """
-    width, height = 1200, 675
+    base_w, base_h = 1200, 675
+    scale = min(width / base_w, height / base_h)
+
+    def sc(v):
+        return max(1, int(round(v * scale)))
+
     gold = (235, 180, 90)
     name = _tr_name(symbol, lang)
 
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # پنل نیمه‌شفاف تیره به‌جای افکت شیشه‌ای (چون پس‌زمینه‌ای برای بلور کردن نیست)
-    panel_margin = 70
-    panel = Image.new("RGBA", (width - 2 * panel_margin, height - 2 * panel_margin), (10, 6, 20, 150))
+    # پنل نیمه‌شفاف تیره، وسط‌چین شده، با نسبت طرح پایه (بدون کشیدگی)
+    panel_margin_x = max(0, (width - sc(base_w - 2 * 70)) // 2)
+    panel_margin_y = max(0, (height - sc(base_h - 2 * 70)) // 2)
+    panel_w = width - 2 * panel_margin_x
+    panel_h = height - 2 * panel_margin_y
+    panel = Image.new("RGBA", (panel_w, panel_h), (10, 6, 20, 150))
     mask = Image.new("L", panel.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle(
-        [0, 0, panel.size[0] - 1, panel.size[1] - 1], radius=32, fill=255
+        [0, 0, panel.size[0] - 1, panel.size[1] - 1], radius=sc(32), fill=255
     )
-    img.paste(panel, (panel_margin, panel_margin), mask)
+    img.paste(panel, (panel_margin_x, panel_margin_y), mask)
 
-    greeting_font = _get_font(24)
-    name_font = _get_font(54)
-    price_label_font = _get_font(24)
-    price_font = _get_font(72)
-    change_font = _get_font(30)
-    footer_font = _get_font(20)
+    greeting_font = _get_font(sc(24))
+    name_font = _get_font(sc(54))
+    price_label_font = _get_font(sc(24))
+    price_font = _get_font(sc(72))
+    change_font = _get_font(sc(30))
+    footer_font = _get_font(sc(20))
+
+    cx = width / 2
 
     greeting_text = _fa(_ui(lang, "greeting"))
     gw = draw.textlength(greeting_text, font=greeting_font)
-    draw.text(((width - gw) / 2, 118), greeting_text, font=greeting_font, fill=(235, 225, 210, 255))
+    draw.text((cx - gw / 2, panel_margin_y + sc(48)), greeting_text, font=greeting_font, fill=(235, 225, 210, 255))
 
     name_text = _fa(name)
     nw = draw.textlength(name_text, font=name_font)
-    draw.text(((width - nw) / 2, 168), name_text, font=name_font, fill=(255, 255, 255, 255))
+    draw.text((cx - nw / 2, panel_margin_y + sc(98)), name_text, font=name_font, fill=(255, 255, 255, 255))
 
     price_label = _fa(_ui(lang, "price_label"))
     plw = draw.textlength(price_label, font=price_label_font)
-    draw.text(((width - plw) / 2, 272), price_label, font=price_label_font, fill=(225, 210, 190, 255))
+    draw.text((cx - plw / 2, panel_margin_y + sc(202)), price_label, font=price_label_font, fill=(225, 210, 190, 255))
 
     currency = _ui(lang, "currency")
     price_text = _fa(f"{price:,} {currency}") if price is not None else _fa(_ui(lang, "unknown"))
     pw = draw.textlength(price_text, font=price_font)
-    draw.text(((width - pw) / 2, 306), price_text, font=price_font, fill=gold + (255,))
+    draw.text((cx - pw / 2, panel_margin_y + sc(236)), price_text, font=price_font, fill=gold + (255,))
 
-    y_cursor = 400
+    y_cursor = panel_margin_y + sc(330)
     if change is not None:
         try:
             change_val = float(change)
@@ -380,7 +396,7 @@ def render_video_price_overlay(symbol: str, price, change, lang: str = "fa") -> 
             change_text = _fa(f"{sign}{change_val:.2f}٪ {_ui(lang, 'change_suffix')}")
             cw = draw.textlength(change_text, font=change_font)
             draw.text(
-                ((width - cw) / 2, y_cursor),
+                (cx - cw / 2, y_cursor),
                 change_text,
                 font=change_font,
                 fill=_card_color(change) + (255,),
@@ -392,13 +408,27 @@ def render_video_price_overlay(symbol: str, price, change, lang: str = "fa") -> 
     footer_text = _fa(f"{_ui(lang, 'updated')}: {format_persian_datetime()}")
     fw = draw.textlength(footer_text, font=footer_font)
     draw.text(
-        ((width - fw) / 2, height - panel_margin - 44),
+        (cx - fw / 2, panel_margin_y + panel_h - sc(44)),
         footer_text,
         font=footer_font,
         fill=(220, 205, 180, 255),
     )
 
     return img
+
+
+def _get_video_dimensions(path):
+    """عرض و ارتفاع واقعی فایل ویدیو رو با ffprobe برمی‌گردونه (هر ابعادی که باشه)"""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "csv=s=x:p=0",
+        path,
+    ]
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    w_str, h_str = result.stdout.strip().split("x")
+    return int(w_str), int(h_str)
 
 
 def _burn_overlay_on_video(overlay_img: Image.Image) -> str:
@@ -417,7 +447,7 @@ def _burn_overlay_on_video(overlay_img: Image.Image) -> str:
         "-i", BG_VIDEO_PATH,
         "-i", overlay_path,
         "-filter_complex",
-        "[1:v][0:v]scale2ref=main_w:main_h[ovr][base];[base][ovr]overlay=0:0:shortest=1",
+        "[0:v][1:v]overlay=0:0:shortest=1",
         "-c:a", "copy",
         out_path,
     ]
@@ -515,7 +545,11 @@ async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if os.path.exists(BG_VIDEO_PATH):
         out_path = None
         try:
-            overlay_img = render_video_price_overlay(symbol, price, change, lang=lang)
+            try:
+                vid_w, vid_h = _get_video_dimensions(BG_VIDEO_PATH)
+            except Exception:
+                vid_w, vid_h = 1200, 675  # اگه ffprobe شکست خورد، فرض پیش‌فرض
+            overlay_img = render_video_price_overlay(symbol, price, change, lang=lang, width=vid_w, height=vid_h)
             out_path = _burn_overlay_on_video(overlay_img)
             with open(out_path, "rb") as f:
                 sent = await message.reply_video(video=f, caption=caption)
