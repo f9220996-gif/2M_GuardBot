@@ -30,6 +30,25 @@ else:
 # ===== ChatGPT (OpenAI) =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+QUOTA_EXCEEDED_MSG = "⚠️ شما پیام‌های چت امروزتون رو تموم کردین.\nفردا دوباره می‌تونید از هوش مصنوعی استفاده کنید."
+
+
+def _is_quota_error(e: Exception) -> bool:
+    """
+    خطای 429 (سهمیه‌ی روزانه‌ی رایگان Gemini تموم شده) رو تشخیص می‌ده.
+    این خطا معمولاً به‌شکل google.api_core.exceptions.ResourceExhausted
+    میاد و پیامش شامل «429» یا «quota» هست.
+    """
+    err_str = str(e)
+    type_name = type(e).__name__
+    return (
+        "429" in err_str
+        or "quota" in err_str.lower()
+        or "ResourceExhausted" in type_name
+        or "RateLimitError" in type_name  # نمونه‌ی مشابه برای OpenAI
+    )
+
+
 async def get_ai_response(text, model_type="gemini"):
     """دریافت پاسخ از مدل انتخاب شده"""
     try:
@@ -49,8 +68,10 @@ async def get_ai_response(text, model_type="gemini"):
         
         else:
             return "❌ مدل انتخاب شده در دسترس نیست. لطفاً مدل دیگری را انتخاب کنید."
-            
+
     except Exception as e:
+        if _is_quota_error(e):
+            return QUOTA_EXCEEDED_MSG
         return f"❌ خطا: {str(e)}"
 
 # ===== تابع ai_handler (برای گروه) =====
@@ -134,6 +155,13 @@ async def ai_private_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ===== ثبت این پیام به‌عنوان «پنل فعلی» =====
     db.set_setting(f"panel_msg_{chat.id}", str(sent.message_id))
     # ===============================================
+
+    # ===== پاک کردن سؤالی که کاربر فرستاد، تا فقط جواب (پنل فعلی) رو صفحه بمونه =====
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+    # ===================================================================================
 
 
 # ---------------------------------------------------------------------------
