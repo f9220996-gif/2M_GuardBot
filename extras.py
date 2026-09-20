@@ -51,6 +51,8 @@ try:
 except ImportError:  # نمودار کار نمی‌کنه، ولی بقیه‌ی قابلیت‌ها سالمن
     HAS_MPL = False
 
+import arabic_reshaper
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -171,6 +173,19 @@ def _norm(text: str) -> str:
     t = t.replace("٫", ".")
     t = re.sub(r"[!؟?.]+$", "", t.strip())
     return re.sub(r"\s+", " ", t).strip()
+
+
+def _fa_mpl(text: str) -> str:
+    """
+    آماده‌سازی متن فارسی مخصوص matplotlib.
+
+    برخلاف PIL (که با pc._fa از reshape + bidi استفاده می‌کنه)، matplotlib خودش
+    به‌صورت خودکار جهت متن راست‌به‌چپ رو تشخیص می‌ده و می‌چرخونه. اگه اینجا هم
+    دستی bidi (get_display) اعمال بشه، متن دوبار برعکس می‌شه و حروف قاطی
+    نشون داده می‌شن (مثلاً «دلار» تبدیل می‌شه به «رلاد»).
+    برای همین این تابع فقط حروف رو می‌چسبونه (reshape) و جهتش رو دست نمی‌زنه.
+    """
+    return arabic_reshaper.reshape(text)
 
 
 # ---------------------------------------------------------------------------
@@ -638,11 +653,11 @@ def render_chart(symbol: str, rows, period_days: int, period_label: str) -> io.B
     sign = "+" if change >= 0 else ""
 
     name = pc._tr_name(symbol, "fa")
-    fig.text(0.5, 0.865, pc._fa(name), ha="center", va="center", fontsize=30, color="white")
-    fig.text(0.5, 0.808, pc._fa(period_label), ha="center", va="center", fontsize=15, color=soft)
-    fig.text(0.5, 0.748, pc._fa(f"{int(last):,} تومان"), ha="center", va="center",
+    fig.text(0.5, 0.865, _fa_mpl(name), ha="center", va="center", fontsize=30, color="white")
+    fig.text(0.5, 0.808, _fa_mpl(period_label), ha="center", va="center", fontsize=15, color=soft)
+    fig.text(0.5, 0.748, _fa_mpl(f"{int(last):,} تومان"), ha="center", va="center",
              fontsize=25, color=gold)
-    fig.text(0.5, 0.690, pc._fa(f"{sign}{change:.2f}٪"), ha="center", va="center",
+    fig.text(0.5, 0.690, _fa_mpl(f"{sign}{change:.2f}٪"), ha="center", va="center",
              fontsize=16, color=change_color)
 
     chart_buf = io.BytesIO()
