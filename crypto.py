@@ -217,12 +217,19 @@ BG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg
 BG_VIDEO_PATH = os.path.join(os.path.dirname(__file__), "assets", "price_card_bg.mp4")
 
 
-def _load_background(width, height):
-    """پس‌زمینه واقعی رو می‌گیره، برش می‌زنه که کامل قاب رو پر کنه، و کمی تیره‌ترش می‌کنه"""
-    if not os.path.exists(BG_IMAGE_PATH):
+def _load_background(width, height, source_img=None):
+    """
+    پس‌زمینه رو می‌گیره، برش می‌زنه که کامل قاب رو پر کنه، و کمی تیره‌ترش می‌کنه.
+    اگه source_img داده بشه (مثلاً یه فریم استخراج‌شده از ویدیو)، به‌جای فایل
+    ثابت BG_IMAGE_PATH از همون استفاده می‌کنه.
+    """
+    if source_img is not None:
+        bg = source_img.convert("RGB")
+    elif os.path.exists(BG_IMAGE_PATH):
+        bg = Image.open(BG_IMAGE_PATH).convert("RGB")
+    else:
         return _vertical_gradient(width, height, (18, 10, 34), (6, 4, 14))
 
-    bg = Image.open(BG_IMAGE_PATH).convert("RGB")
     src_w, src_h = bg.size
     target_ratio = width / height
     src_ratio = src_w / src_h
@@ -240,6 +247,35 @@ def _load_background(width, height):
     overlay = Image.new("RGBA", (width, height), (8, 4, 18, 110))
     bg = Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
     return bg
+
+
+def _extract_video_frame(video_path, timestamp: float = 0.5):
+    """
+    یک فریم ثابت از ویدیو رو (پیش‌فرض: نیم‌ثانیه اول) با ffmpeg به‌عنوان عکس
+    استخراج می‌کنه و به‌صورت PIL Image برمی‌گردونه. اگه ffmpeg نصب نباشه یا
+    خطایی پیش بیاد، None برمی‌گردونه (و کد بالادستی به پس‌زمینه‌ی ثابت برمی‌گرده).
+    """
+    out_path = tempfile.mktemp(suffix=".jpg")
+    cmd = [
+        "ffmpeg", "-y",
+        "-noautorotate",
+        "-ss", str(timestamp),
+        "-i", video_path,
+        "-frames:v", "1",
+        "-q:v", "2",
+        out_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        img = Image.open(out_path).convert("RGB")
+        img.load()
+        return img
+    except Exception as e:
+        logger.warning(f"استخراج فریم از ویدیو ناموفق بود: {e}")
+        return None
+    finally:
+        if os.path.exists(out_path):
+            os.remove(out_path)
 
 
 def _glass_panel(img, x0, y0, x1, y1, radius=32, blur=14, white_mix=0.06):
@@ -262,12 +298,12 @@ def _glass_panel(img, x0, y0, x1, y1, radius=32, blur=14, white_mix=0.06):
     return img
 
 
-def render_single_card(symbol: str, price, change, lang: str = "fa", extra_info=None) -> Image.Image:
+def render_single_card(symbol: str, price, change, lang: str = "fa", extra_info=None, bg_source=None) -> Image.Image:
     width, height = 1200, 675  # نسبت دقیق 16:9
     gold = (235, 180, 90)  # طلایی/کهربایی هماهنگ با پس‌زمینه
     name = _tr_name(symbol, lang)
 
-    img = _load_background(width, height)
+    img = _load_background(width, height, source_img=bg_source)
 
     # پنل شیشه‌ای مات (بدون خط دور، بدون گوشه‌های تزئینی)
     panel_margin = 70
