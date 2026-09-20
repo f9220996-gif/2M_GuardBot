@@ -495,6 +495,9 @@ def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_ids,
     )
 
 
+DEBUG_VIDEO_ERRORS = True  # وقتی کار درست شد، این رو False کن تا خطاها فقط تو لاگ بمونن
+
+
 async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE, chat, symbol, price, change, lang, caption):
     """
     اگه ویدیوی پس‌زمینه (assets/price_card_bg.mp4) وجود داشت، یک PNG شفاف
@@ -503,6 +506,8 @@ async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE,
     می‌کنه، ویدیوی نهایی کش نمی‌شه - هر بار از نو ساخته می‌شه.
     اگه ساخت ویدیو به هر دلیلی شکست بخوره (مثلاً ffmpeg نصب نباشه)،
     به همون روش قبلی (عکس با متن قیمت) برمی‌گرده.
+    وقتی DEBUG_VIDEO_ERRORS روشنه، متن دقیق خطا رو هم به‌عنوان یه پیام
+    جدا تو همون چت می‌فرسته تا بدون رفتن سراغ لاگ سرور، خود کاربر ببینتش.
     """
     message = update.effective_message
     sent = None
@@ -516,6 +521,12 @@ async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 sent = await message.reply_video(video=f, caption=caption)
         except Exception as e:
             logger.warning(f"ساخت ویدیوی قیمت‌دار ناموفق بود، برگشت به عکس: {e}")
+            if DEBUG_VIDEO_ERRORS:
+                try:
+                    err_text = str(e)[:1500]
+                    await message.reply_text(f"⚠️ خطای ساخت ویدیو (دیباگ):\n{err_text}")
+                except Exception:
+                    pass
             sent = None
         finally:
             if out_path and os.path.exists(out_path):
