@@ -12,6 +12,19 @@ import database as db
 from config import CREATOR_ID
 
 
+def _support_prompt_text(extra_line=None):
+    text = (
+        "📩 **ارسال پیام به پشتیبانی**\n\n"
+        "لطفاً پیام خود را بنویسید.\n"
+        "می‌توانید همراه با پیام، عکس هم ارسال کنید.\n\n"
+        "⚠️ پیام شما پس از تأیید برای پشتیبانی ارسال می‌شود.\n"
+        "برای لغو، دکمه لغو را بزنید."
+    )
+    if extra_line:
+        text = f"{extra_line}\n\n{text}"
+    return text
+
+
 # ===== دکمه پشتیبانی در منوی اصلی =====
 async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """منوی پشتیبانی"""
@@ -27,11 +40,7 @@ async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # کاربر عادی → فرم ارسال پیام
     await query.edit_message_text(
-        "📩 **ارسال پیام به پشتیبانی**\n\n"
-        "لطفاً پیام خود را بنویسید.\n"
-        "می‌توانید همراه با پیام، عکس هم ارسال کنید.\n\n"
-        "⚠️ پیام شما پس از تأیید برای پشتیبانی ارسال می‌شود.\n"
-        "برای لغو، دکمه لغو را بزنید.",
+        _support_prompt_text(),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✘ لغو", callback_data="start_menu")]
         ]),
@@ -40,6 +49,28 @@ async def support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["waiting_for_support"] = True
     context.user_data["support_photo"] = None
     context.user_data["support_text"] = None
+    # آیدی همین پیام رو ذخیره می‌کنیم تا مراحل بعدی (دریافت عکس/متن) رو
+    # به‌جای ساختن پیام جدید، رو همینو ویرایش کنیم
+    context.user_data["support_prompt_chat_id"] = query.message.chat_id
+    context.user_data["support_prompt_message_id"] = query.message.message_id
+
+
+async def _edit_support_prompt(context, text, kb, parse_mode="Markdown"):
+    """پیام پرامپت پشتیبانی رو ویرایش می‌کنه؛ اگه ممکن نبود، پیام جدید می‌فرسته"""
+    prompt_chat_id = context.user_data.get("support_prompt_chat_id")
+    prompt_message_id = context.user_data.get("support_prompt_message_id")
+    if prompt_chat_id and prompt_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=prompt_chat_id, message_id=prompt_message_id,
+                text=text, reply_markup=kb, parse_mode=parse_mode
+            )
+            return
+        except Exception:
+            pass
+    sent = await context.bot.send_message(prompt_chat_id, text, reply_markup=kb, parse_mode=parse_mode)
+    context.user_data["support_prompt_chat_id"] = sent.chat_id
+    context.user_data["support_prompt_message_id"] = sent.message_id
 
 
 async def receive_support_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -47,35 +78,40 @@ async def receive_support_message(update: Update, context: ContextTypes.DEFAULT_
     if not context.user_data.get("waiting_for_support"):
         return False
     
-    user = update.effective_user
     message = update.effective_message
     
     # ذخیره عکس اگه وجود داشته باشه
-    photo = None
     if message.photo:
-        photo = message.photo[-1].file_id
-        context.user_data["support_photo"] = photo
-        await message.reply_text("✔ عکس دریافت شد. حالا متن خود را بنویسید.")
+        context.user_data["support_photo"] = message.photo[-1].file_id
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("✘ لغو", callback_data="start_menu")]])
+        await _edit_support_prompt(
+            context, _support_prompt_text("✔ عکس دریافت شد. حالا متن خود را بنویسید."), kb
+        )
         return True
     
     # ذخیره متن
     if message.text:
         context.user_data["support_text"] = message.text
-        
-        # ===== دکمه‌های بله/خیر در یک خط (کنار هم) =====
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
         kb = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✔ بله", callback_data=f"support_confirm:{message.message_id}"),
                 InlineKeyboardButton("✘ خیر", callback_data="support_cancel"),
             ]
         ])
-        # ================================================
-        
-        await message.reply_text(
+        await _edit_support_prompt(
+            context,
             "📩 **تأیید ارسال**\n\n"
             "آیا می‌خواهید این پیام را برای پشتیبانی ارسال کنید؟",
-            reply_markup=kb,
-            parse_mode="Markdown"
+            kb
         )
         return True
     
@@ -87,7 +123,6 @@ async def confirm_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    _, message_id = query.data.split(":")
     user = update.effective_user
     
     # دریافت اطلاعات از context
@@ -120,14 +155,12 @@ async def confirm_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📝 متن:\n{data['text']}"
     )
     
-    # ===== دکمه‌های پاسخ/حذف در یک خط (کنار هم) =====
     kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📩 پاسخ", callback_data=f"support_reply:{data['user_id']}:{data['timestamp']}"),
             InlineKeyboardButton("🗑 حذف", callback_data=f"support_delete:{data['user_id']}:{data['timestamp']}"),
         ]
     ])
-    # =================================================
     
     try:
         if photo:
@@ -162,6 +195,8 @@ async def confirm_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["waiting_for_support"] = False
     context.user_data["support_photo"] = None
     context.user_data["support_text"] = None
+    context.user_data.pop("support_prompt_chat_id", None)
+    context.user_data.pop("support_prompt_message_id", None)
 
 
 async def cancel_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -172,6 +207,8 @@ async def cancel_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["waiting_for_support"] = False
     context.user_data["support_photo"] = None
     context.user_data["support_text"] = None
+    context.user_data.pop("support_prompt_chat_id", None)
+    context.user_data.pop("support_prompt_message_id", None)
     
     # ===== برگشت به پنل اصلی =====
     from start import send_start_panel
@@ -267,7 +304,6 @@ async def show_support_message(update: Update, context: ContextTypes.DEFAULT_TYP
         f"📝 متن:\n{msg.get('text', 'بدون متن')}"
     )
     
-    # ===== دکمه‌های پاسخ/حذف در یک خط (کنار هم) =====
     kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📩 پاسخ", callback_data=f"support_reply:{msg['user_id']}:{msg['timestamp']}"),
@@ -275,7 +311,6 @@ async def show_support_message(update: Update, context: ContextTypes.DEFAULT_TYP
         ],
         [InlineKeyboardButton("⬅️ بازگشت", callback_data="support_admin")],
     ])
-    # =================================================
     
     if msg.get('photo'):
         await query.edit_message_caption(
@@ -307,35 +342,57 @@ async def support_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
     
-    context.user_data["support_reply_to"] = user_id
+    context.user_data["waiting_support_reply_to"] = user_id
     context.user_data["support_reply_timestamp"] = timestamp
+    # آیدی همین پیام رو ذخیره می‌کنیم تا بعد از دریافت پاسخ، به‌جای پیام
+    # جدید، همینو ویرایش کنیم
+    context.user_data["support_reply_prompt_chat_id"] = query.message.chat_id
+    context.user_data["support_reply_prompt_message_id"] = query.message.message_id
 
 
 async def send_support_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """ارسال پاسخ به کاربر"""
-    if not context.user_data.get("support_reply_to"):
+    if not context.user_data.get("waiting_support_reply_to"):
         return False
     
-    user_id = context.user_data["support_reply_to"]
+    user_id = context.user_data["waiting_support_reply_to"]
     reply_text = update.effective_message.text
-    
-    if reply_text == "/cancel":
-        context.user_data["support_reply_to"] = None
-        await update.effective_message.reply_text("✘ پاسخ لغو شد.")
-        return True
-    
+
+    prompt_chat_id = context.user_data.pop("support_reply_prompt_chat_id", None)
+    prompt_message_id = context.user_data.pop("support_reply_prompt_message_id", None)
+    context.user_data.pop("support_reply_timestamp", None)
+    context.user_data["waiting_support_reply_to"] = None
+
     try:
-        await context.bot.send_message(
-            user_id,
-            f"📩 **پاسخ پشتیبانی**\n\n{reply_text}\n\n"
-            "💡 برای ارسال پیام جدید، دکمه پشتیبانی را بزنید.",
-            parse_mode="Markdown"
-        )
-        await update.effective_message.reply_text("✔ پاسخ با موفقیت ارسال شد.")
-    except Exception as e:
-        await update.effective_message.reply_text(f"✘ خطا در ارسال: {e}")
-    
-    context.user_data["support_reply_to"] = None
+        await update.effective_message.delete()
+    except Exception:
+        pass
+
+    if reply_text == "/cancel":
+        result_text = "✘ پاسخ لغو شد."
+    else:
+        try:
+            await context.bot.send_message(
+                user_id,
+                f"📩 **پاسخ پشتیبانی**\n\n{reply_text}\n\n"
+                "💡 برای ارسال پیام جدید، دکمه پشتیبانی را بزنید.",
+                parse_mode="Markdown"
+            )
+            result_text = "✔ پاسخ با موفقیت ارسال شد."
+        except Exception as e:
+            result_text = f"✘ خطا در ارسال: {e}"
+
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ بازگشت", callback_data="support_admin")]])
+    if prompt_chat_id and prompt_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=prompt_chat_id, message_id=prompt_message_id,
+                text=result_text, reply_markup=kb, parse_mode="Markdown"
+            )
+            return True
+        except Exception:
+            pass
+    await context.bot.send_message(update.effective_chat.id, result_text, reply_markup=kb, parse_mode="Markdown")
     return True
 
 
