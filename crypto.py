@@ -418,9 +418,12 @@ def render_video_price_overlay(symbol: str, price, change, lang: str = "fa",
 
 
 def _get_video_dimensions(path):
-    """عرض و ارتفاع واقعی فایل ویدیو رو با ffprobe برمی‌گردونه (هر ابعادی که باشه)"""
+    """عرض و ارتفاع خامِ (بدون چرخش خودکار) فایل ویدیو رو با ffprobe برمی‌گردونه.
+    مهمه که همینجوری خام باشه، چون ffmpeg موقع overlay هم با -noautorotate
+    اجرا میشه (تا ابعاد فریم واقعی که overlay روش گذاشته میشه دقیقاً همینا باشه)."""
     cmd = [
         "ffprobe", "-v", "error",
+        "-noautorotate",
         "-select_streams", "v:0",
         "-show_entries", "stream=width,height",
         "-of", "csv=s=x:p=0",
@@ -444,6 +447,7 @@ def _burn_overlay_on_video(overlay_img: Image.Image) -> str:
 
     cmd = [
         "ffmpeg", "-y",
+        "-noautorotate",
         "-i", BG_VIDEO_PATH,
         "-i", overlay_path,
         "-filter_complex",
