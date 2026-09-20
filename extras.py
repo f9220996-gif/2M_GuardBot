@@ -566,40 +566,14 @@ def _setup_font():
             logger.warning(f"لود فونت نمودار ناموفق بود: {e}")
 
 
-# پس‌زمینه‌ی نمودار: هر عکسی که تو پوشه‌ی assets با یکی از این اسم‌ها بذاری استفاده می‌شه.
-# اگه هیچ‌کدوم نبود، همون پس‌زمینه‌ی کارت قیمت‌ها (price_card_bg.jpg) استفاده می‌شه.
-CHART_BG_NAMES = ("chart_bg.jpg", "chart_bg.jpeg", "chart_bg.png")
+# پس‌زمینه‌ی نمودار همیشه دقیقاً همون پس‌زمینه‌ی کارت قیمت دلار/طلا/تتره
+# (فایل assets/price_card_bg.jpg). هر عکسی که اونجا جایگزین بشه، خودکار رو
+# نمودار هم اعمال می‌شه، بدون نیاز به فایل جدا برای نمودار.
 CHART_W, CHART_H = 1200, 675
 PANEL_MARGIN = 40
 
 
-def _fit_background(bg: Image.Image, width: int, height: int) -> Image.Image:
-    """عکس رو برش می‌زنه که کامل قاب رو پر کنه و یه لایه‌ی تیره‌ی نیمه‌شفاف روش می‌ندازه"""
-    bg = bg.convert("RGB")
-    src_w, src_h = bg.size
-    target = width / height
-    if src_w / src_h > target:
-        new_w = int(src_h * target)
-        left = (src_w - new_w) // 2
-        bg = bg.crop((left, 0, left + new_w, src_h))
-    else:
-        new_h = int(src_w / target)
-        top = (src_h - new_h) // 2
-        bg = bg.crop((0, top, src_w, top + new_h))
-    bg = bg.resize((width, height), Image.LANCZOS)
-    overlay = Image.new("RGBA", (width, height), (8, 4, 18, 110))
-    return Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
-
-
 def _load_chart_background(width: int, height: int) -> Image.Image:
-    assets = os.path.dirname(pc.FONT_PATH)
-    for name in CHART_BG_NAMES:
-        path = os.path.join(assets, name)
-        if os.path.exists(path):
-            try:
-                return _fit_background(Image.open(path), width, height)
-            except Exception as e:
-                logger.warning(f"لود پس‌زمینه‌ی نمودار ({name}) ناموفق بود: {e}")
     return pc._load_background(width, height)
 
 
