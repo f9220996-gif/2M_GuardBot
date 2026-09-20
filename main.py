@@ -87,6 +87,9 @@ from command_shortcuts import (
     cmd_group_help
 )
 
+# ===== آمار گروه، تبدیل ارز و نمودار =====
+import extras
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -355,6 +358,11 @@ def main():
         consumed = await send_support_reply(update, context)
         if consumed:
             return
+
+        # تبدیل ارز و نمودار (extras.py) - باید قبل از پاک‌شدن پیام‌های ناشناخته چک بشه
+        consumed = await extras.handle_text(update, context)
+        if consumed:
+            return
         
         text = (update.effective_message.text or "").strip()
         if text in PRICE_LOOKUP_NAMES:
@@ -545,6 +553,9 @@ def main():
     # ===== Jobها =====
     app.job_queue.run_repeating(send_pending_reports_job, interval=120, first=120)
     app.job_queue.run_repeating(run_auto_cleanup_job, interval=3600, first=300)
+
+    # ===== آمار گروه، تبدیل ارز و نمودار =====
+    extras.register(app)
 
     # ===== ثبت آخرین آیدی پیام =====
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.ALL, track_last_message), group=5)
