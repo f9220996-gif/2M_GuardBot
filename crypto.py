@@ -71,6 +71,9 @@ UI_STRINGS = {
 
 LANG_NAMES = {"fa": "فارسی", "en": "English", "ar": "العربية"}
 
+# مدت زمان تا حذف خودکار پیام‌ها (ثانیه) — فقط تو پی‌وی ربات
+AUTO_DELETE_DELAY = 60
+
 
 def _tr_name(symbol, lang):
     entry = NAME_TRANSLATIONS.get(symbol)
@@ -357,22 +360,23 @@ def _build_caption(symbol, price, change, lang="fa"):
 
 
 async def _auto_delete_price_message(context: ContextTypes.DEFAULT_TYPE):
-    """چند ثانیه بعد از ارسال، پیام قیمت رو (فقط تو پی‌وی) پاک می‌کنه"""
+    """بعد از زمان مشخص، همه‌ی پیام‌های لیست‌شده (پیام کاربر + جواب ربات) رو پاک می‌کنه"""
     job = context.job
-    try:
-        await context.bot.delete_message(chat_id=job.chat_id, message_id=job.data)
-    except Exception:
-        pass
+    for message_id in job.data:
+        try:
+            await context.bot.delete_message(chat_id=job.chat_id, message_id=message_id)
+        except Exception:
+            pass
 
 
-def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_id, delay: int = 5):
-    """اگه چت از نوع پی‌وی بود و job_queue در دسترس بود، حذف خودکار رو زمان‌بندی می‌کنه"""
+def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_ids, delay: int = AUTO_DELETE_DELAY):
+    """فقط تو پی‌وی ربات: حذف خودکار پیام‌ها رو بعد از delay ثانیه زمان‌بندی می‌کنه"""
     if not chat or chat.type != "private":
         return
     if not context.job_queue:
         return
     context.job_queue.run_once(
-        _auto_delete_price_message, delay, chat_id=chat.id, data=message_id
+        _auto_delete_price_message, delay, chat_id=chat.id, data=list(message_ids)
     )
 
 
@@ -403,7 +407,8 @@ async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE,
         img = render_single_card(symbol, price, change, lang=lang)
         sent = await message.reply_photo(photo=_image_to_bytes(img), caption=caption)
 
-    _schedule_auto_delete(context, chat, sent.message_id)
+    # فقط تو پی‌وی: بعد از ۶۰ ثانیه هم پیام کاربر و هم جواب ربات پاک می‌شن
+    _schedule_auto_delete(context, chat, [sent.message_id, message.message_id])
 
 
 async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
