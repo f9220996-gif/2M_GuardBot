@@ -476,7 +476,7 @@ async def _auto_delete_price_message(context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
-def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_id, delay: int = 5):
+def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_id, delay: int = 60):
     """اگه چت از نوع پی‌وی بود و job_queue در دسترس بود، حذف خودکار رو زمان‌بندی می‌کنه"""
     if not chat or chat.type != "private":
         return
