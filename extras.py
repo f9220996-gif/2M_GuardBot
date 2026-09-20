@@ -492,6 +492,8 @@ async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE, parsed
     chat = update.effective_chat
     direction, amount, cur_name = parsed
     symbol, emoji = _CUR[cur_name]
+    if not _feature_ok(chat, "convert"):
+        return False
     if symbol == "dollar" and not _feature_ok(chat, "dollar"):
         return False
 
@@ -666,6 +668,8 @@ async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE, fa_symbo
     chat = update.effective_chat
     symbol = _CHART_SYMBOL[fa_symbol]
     days, label = _CHART_PERIOD[fa_period]
+    if not _feature_ok(chat, "chart"):
+        return False
     if symbol == "dollar" and not _feature_ok(chat, "dollar"):
         return False
 
@@ -729,6 +733,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     if text in _STATS_TODAY or text in _STATS_TOTAL:
         if not in_group:          # آمار فقط برای گروه‌هاست
             return False
+        if not _feature_ok(chat, "stats"):   # تو پنل گروه خاموش شده (شمارش پیام‌ها ادامه داره)
+            return True
         await cmd_stats(update, context, total_mode=text in _STATS_TOTAL)
         return True
 
