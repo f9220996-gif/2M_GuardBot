@@ -15,9 +15,11 @@
        «نمودار دلار»  /  «نمودار طلا»  /  «نمودار تتر»
        «نمودار دلار هفته»  /  «نمودار دلار ماه»
 
-نصب: تو فایل اصلی، بعد از ساختن application فقط این دو خط:
+نصب: تو main.py
        import extras
-       extras.register(application)
+       extras.register(app)
+       و تو guarded_private_text (برای پی‌وی) قبل از چک قیمت‌ها:
+       if await extras.handle_text(update, context): return
 """
 
 import asyncio
@@ -34,7 +36,10 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, MessageHandler, filters
 
-import crypto as pc
+try:
+    import crypto as pc          # اسم فایل قیمت‌ها تو پروژه
+except ImportError:
+    import price_commands as pc   # اگه اسمش این بود
 
 try:
     from matplotlib.figure import Figure
@@ -58,6 +63,7 @@ DB_PATH = os.environ.get("STATS_DB_PATH", os.path.join(os.path.dirname(os.path.a
 MAX_PEOPLE = 10                 # حداکثر تعداد نفرات تو لیست آمار گروه
 PRICE_SAMPLE_INTERVAL = 600     # هر چند ثانیه یه‌بار قیمت‌ها برای نمودار ذخیره بشن
 PRICE_KEEP_DAYS = 35            # قیمت‌های قدیمی‌تر از این پاک می‌شن
+AUTO_DELETE_DELAY = 60          # تو پی‌وی، پیام کاربر و جواب ربات بعد از این مدت (ثانیه) پاک می‌شن
 RATE_CACHE_SECONDS = 45         # کش نرخ، برای اینکه با هر پیام به tgju/CoinGecko درخواست نره
 
 try:
@@ -77,6 +83,33 @@ LABELS = {
     "messages": "پیام", "photos": "عکس", "videos": "فیلم",
     "gifs": "گیف", "stickers": "استیکر", "links": "لینک",
 }
+
+async def _auto_delete_job(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    for message_id in job.data:
+        try:
+            await context.bot.delete_message(chat_id=job.chat_id, message_id=message_id)
+        except Exception:
+            pass
+
+
+def _schedule_delete(context, chat, message_ids, delay: int = AUTO_DELETE_DELAY):
+    """فقط تو پی‌وی: پیام‌ها رو بعد از delay ثانیه پاک می‌کنه"""
+    if not chat or chat.type != "private" or not context.job_queue:
+        return
+    context.job_queue.run_once(_auto_delete_job, delay, chat_id=chat.id, data=list(message_ids))
+
+
+def _feature_ok(chat, key: str) -> bool:
+    """اگه قابلیتی (مثل «dollar») تو پنل گروه خاموش شده باشه، اینجا هم کار نمی‌کنه"""
+    if not chat or chat.type not in GROUP_TYPES:
+        return True
+    try:
+        import database as db
+        return bool(db.is_feature_enabled(chat.id, key))
+    except Exception:
+        return True
+
 
 # ---------------------------------------------------------------------------
 # ابزارهای متنی: ارقام فارسی، تاریخ شمسی، نرمال‌سازی
@@ -458,6 +491,8 @@ async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE, parsed
     chat = update.effective_chat
     direction, amount, cur_name = parsed
     symbol, emoji = _CUR[cur_name]
+    if symbol == "dollar" and not _feature_ok(chat, "dollar"):
+        return False
 
     if amount <= 0 or amount > _MAX_AMOUNT:
         return
@@ -465,7 +500,7 @@ async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE, parsed
     rate = await get_rate(symbol)
     if not rate:
         sent = await msg.reply_text("❌ نتونستم نرخ رو بگیرم، چند لحظه‌ی دیگه دوباره امتحان کن.")
-        pc._schedule_auto_delete(context, chat, [sent.message_id, msg.message_id])
+        _schedule_delete(context, chat, [sent.message_id, msg.message_id])
         return
 
     if direction == "to_toman":
@@ -481,7 +516,7 @@ async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE, parsed
         f"📌 نرخ هر {cur_name}: {fmt_int(rate)} تومان"
     )
     sent = await msg.reply_text(text, parse_mode=ParseMode.HTML)
-    pc._schedule_auto_delete(context, chat, [sent.message_id, msg.message_id])
+    _schedule_delete(context, chat, [sent.message_id, msg.message_id])
 
 
 # ---------------------------------------------------------------------------
@@ -581,10 +616,12 @@ async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE, fa_symbo
     chat = update.effective_chat
     symbol = _CHART_SYMBOL[fa_symbol]
     days, label = _CHART_PERIOD[fa_period]
+    if symbol == "dollar" and not _feature_ok(chat, "dollar"):
+        return False
 
     async def _reply_and_clean(text):
         sent = await msg.reply_text(text)
-        pc._schedule_auto_delete(context, chat, [sent.message_id, msg.message_id])
+        _schedule_delete(context, chat, [sent.message_id, msg.message_id])
 
     if not HAS_MPL:
         await _reply_and_clean("❌ کتابخونه‌ی matplotlib نصب نیست، نمودار کار نمی‌کنه.")
@@ -619,7 +656,7 @@ async def cmd_chart(update: Update, context: ContextTypes.DEFAULT_TYPE, fa_symbo
             caption += f"\n\n📌 فعلاً فقط داده‌ی {p(int(covered_hours // 24))} روز اخیر ثبت شده."
 
     sent = await msg.reply_photo(photo=buf, caption=caption)
-    pc._schedule_auto_delete(context, chat, [sent.message_id, msg.message_id])
+    _schedule_delete(context, chat, [sent.message_id, msg.message_id])
 
 
 # ---------------------------------------------------------------------------
@@ -630,27 +667,34 @@ _STATS_TODAY = {"آمار", "امار"}
 _STATS_TOTAL = {"آمار کل", "امار کل"}
 
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """اگه پیام یکی از دستورهای این فایل بود انجامش می‌ده و True برمی‌گردونه، وگرنه False"""
     msg = update.effective_message
+    chat = update.effective_chat
     if not msg or not msg.text or len(msg.text) > 80:
-        return
+        return False
     text = _norm(msg.text)
+    in_group = bool(chat and chat.type in GROUP_TYPES)
 
-    if text in _STATS_TODAY:
-        await cmd_stats(update, context, total_mode=False)
-        return
-    if text in _STATS_TOTAL:
-        await cmd_stats(update, context, total_mode=True)
-        return
+    if text in _STATS_TODAY or text in _STATS_TOTAL:
+        if not in_group:          # آمار فقط برای گروه‌هاست
+            return False
+        await cmd_stats(update, context, total_mode=text in _STATS_TOTAL)
+        return True
 
     m = _CHART_RE.match(text)
     if m:
-        await cmd_chart(update, context, m.group(1), m.group(2))
-        return
+        return await cmd_chart(update, context, m.group(1), m.group(2)) is not False
 
     parsed = parse_conversion(text)
     if parsed:
-        await cmd_convert(update, context, parsed)
+        return await cmd_convert(update, context, parsed) is not False
+
+    return False
+
+
+async def _group_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await handle_text(update, context)
 
 
 # ---------------------------------------------------------------------------
@@ -658,20 +702,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 
 def register(application):
-    """تو فایل اصلی، بعد از ساختن application صدا بزن: extras.register(application)"""
+    """تو main.py بعد از ساختن app صدا بزن: extras.register(app)
+
+    نکته: دستورهای پی‌وی (تبدیل ارز و نمودار) از تو guarded_private_text صدا زده می‌شن
+    (extras.handle_text)، چون اون تابع پیام‌های ناشناخته‌ی پی‌وی رو پاک می‌کنه.
+    """
     _db()  # ساخت جدول‌ها
 
-    # شمارش تو گروه -1 (همیشه اجرا می‌شه، حتی اگه هندلر دیگه‌ای پیام رو بگیره)
+    # شمارش پیام‌های گروه: گروه شماره‌ی مخصوص خودش (-5) تا نه گیت خاموشی (گروه -1) جلوش رو بگیره
+    # و نه هندلر دیگه‌ای. تو PTB تو هر گروه فقط اولین هندلرِ مچ‌شده اجرا می‌شه.
     application.add_handler(
         MessageHandler(
             filters.UpdateType.MESSAGE & filters.ChatType.GROUPS & ~filters.StatusUpdate.ALL,
             count_message,
         ),
-        group=-1,
+        group=-5,
     )
-    # دستورها تو گروه 1 (کنار هندلرهای قبلی تداخل نمی‌کنه)
+    # دستورهای گروه (آمار، تبدیل، نمودار) تو گروه 1
     application.add_handler(
-        MessageHandler(filters.UpdateType.MESSAGE & filters.TEXT & ~filters.COMMAND, handle_text),
+        MessageHandler(
+            filters.UpdateType.MESSAGE & filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+            _group_text_entry,
+        ),
         group=1,
     )
 
