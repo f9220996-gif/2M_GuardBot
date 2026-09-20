@@ -442,7 +442,8 @@ def _build_features_keyboard(chat_id):
         [btn("photos"), btn("videos")],
         [btn("documents"), btn("date")],
         [btn("dollar"), btn("translate")],
-        [btn("ai_chat")],
+        [btn("ai_chat"), btn("stats")],
+        [btn("convert"), btn("chart")],
         [InlineKeyboardButton("⬅️ بازگشت", callback_data=f"grp_open:{chat_id}")],
     ]
     return InlineKeyboardMarkup(rows_kb)
