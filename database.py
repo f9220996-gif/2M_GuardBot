@@ -598,6 +598,9 @@ TOGGLEABLE_FEATURES = {
     "documents": "ارسال فایل",
     "date": "دستور تاریخ",
     "dollar": "دستور دلار",
+    "stats": "آمار گروه",
+    "convert": "تبدیل ارز",
+    "chart": "نمودار قیمت",
 }
 
 
