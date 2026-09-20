@@ -468,22 +468,30 @@ def _build_caption(symbol, price, change, lang="fa"):
 
 
 async def _auto_delete_price_message(context: ContextTypes.DEFAULT_TYPE):
-    """چند ثانیه بعد از ارسال، پیام قیمت رو (فقط تو پی‌وی) پاک می‌کنه"""
+    """چند ثانیه بعد از ارسال، پیام(های) قیمت رو (فقط تو پی‌وی) پاک می‌کنه"""
     job = context.job
-    try:
-        await context.bot.delete_message(chat_id=job.chat_id, message_id=job.data)
-    except Exception:
-        pass
+    message_ids = job.data
+    if isinstance(message_ids, int):
+        message_ids = [message_ids]
+    for msg_id in message_ids:
+        try:
+            await context.bot.delete_message(chat_id=job.chat_id, message_id=msg_id)
+        except Exception:
+            pass
 
 
-def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_id, delay: int = 60):
-    """اگه چت از نوع پی‌وی بود و job_queue در دسترس بود، حذف خودکار رو زمان‌بندی می‌کنه"""
+def _schedule_auto_delete(context: ContextTypes.DEFAULT_TYPE, chat, message_ids, delay: int = 60):
+    """
+    اگه چت از نوع پی‌وی بود و job_queue در دسترس بود، حذف خودکار رو زمان‌بندی می‌کنه.
+    message_ids می‌تونه یک عدد باشه یا یک لیست از چند آیدیِ پیام (مثلاً هم پیام
+    خودِ کاربر هم پیام قیمتی که ربات فرستاده) که همه با هم بعد از delay ثانیه پاک می‌شن.
+    """
     if not chat or chat.type != "private":
         return
     if not context.job_queue:
         return
     context.job_queue.run_once(
-        _auto_delete_price_message, delay, chat_id=chat.id, data=message_id
+        _auto_delete_price_message, delay, chat_id=chat.id, data=message_ids
     )
 
 
@@ -517,7 +525,7 @@ async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE,
         img = render_single_card(symbol, price, change, lang=lang)
         sent = await message.reply_photo(photo=_image_to_bytes(img), caption=caption)
 
-    _schedule_auto_delete(context, chat, sent.message_id)
+    _schedule_auto_delete(context, chat, [message.message_id, sent.message_id])
 
 
 async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
