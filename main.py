@@ -27,7 +27,7 @@ from moderation import (
 from bad_words_filter import check_message_for_bad_words
 from games import (
     cmd_tas, cmd_shir_khat, cmd_sang_kaghaz_gheychi,
-    rps_pick
+    rps_pick, cmd_dooz, dooz_level, dooz_move
 )
 from panel import (
     show_my_groups, open_group_panel, toggle_lock, toggle_active,
@@ -129,6 +129,12 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "راهنما":
         await cmd_group_help(update, context)
+        return
+
+    # بازی دوز (XO)
+    if text == "دوز":
+        if db.is_feature_enabled(chat.id, "games"):
+            await cmd_dooz(update, context)
         return
 
     # نگاشت کلمه‌ی فعلی (سفارشی یا پیش‌فرض) -> کلید اصلی، مخصوص همین گروه
@@ -444,6 +450,8 @@ def main():
     ), group=7)
     app.add_handler(CallbackQueryHandler(tag_close, pattern="^tag_close:"))
     app.add_handler(CallbackQueryHandler(rps_pick, pattern="^rps_pick:"))
+    app.add_handler(CallbackQueryHandler(dooz_level, pattern="^dooz_lvl:"))
+    app.add_handler(CallbackQueryHandler(dooz_move, pattern="^dooz:"))
 
     # ===== چک لیست سیاه =====
     app.add_handler(MessageHandler(
