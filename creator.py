@@ -23,7 +23,12 @@ async def open_creator_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             await update.effective_message.reply_text("⛔️ این پنل فقط برای سازنده ربات است.")
         return
-    
+
+    # اگه از یه فلوی "منتظر متن" (خاموشی/آپدیت) برگشته باشه، پاکش می‌کنیم؛
+    # وگرنه پیام بعدی‌اش تو پی‌وی به‌اشتباه به‌عنوان همون متن ثبت می‌شه
+    context.user_data["waiting_for_shutdown_text"] = False
+    context.user_data["waiting_for_update_msg"] = False
+
     # دریافت وضعیت‌ها
     is_active = db.is_global_active()
     shutdown_msg = db.get_shutdown_message()
@@ -89,7 +94,9 @@ async def ask_set_shutdown_text(update: Update, context: ContextTypes.DEFAULT_TY
     if user.id != CREATOR_ID:
         await query.answer("⛔️ فقط سازنده", show_alert=True)
         return
-    
+
+    context.user_data["waiting_for_update_msg"] = False  # تداخل با فلوی دیگه نباشه
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ بازگشت", callback_data="creator_panel_open")]
     ])
@@ -140,7 +147,9 @@ async def ask_set_update_msg(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user.id != CREATOR_ID:
         await query.answer("⛔️ فقط سازنده", show_alert=True)
         return
-    
+
+    context.user_data["waiting_for_shutdown_text"] = False  # تداخل با فلوی دیگه نباشه
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ بازگشت", callback_data="creator_panel_open")]
     ])
