@@ -501,6 +501,8 @@ async def dooz_move(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     game["updated_at"] = time.time()
     await query.answer()
-    await _safe_edit(query, _dooz_text(game, result), _dooz_keyboard(board))
+    # وقتی بازی تموم شد، دکمه‌ها رو کامل پاک می‌کنیم که دیگه قابل‌کلیک نمونن
+    final_keyboard = None if result else _dooz_keyboard(board)
+    await _safe_edit(query, _dooz_text(game, result), final_keyboard)
     if result:
         games.pop(message_id, None)
