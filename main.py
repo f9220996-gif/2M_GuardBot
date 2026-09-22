@@ -81,6 +81,8 @@ from support import (
 from tag_all import tag_all_members, tag_close, track_seen_user
 
 # ===== میان‌برهای قابل‌تغییر دستورات =====
+import instagram_dl
+
 from command_shortcuts import (
     get_group_command_keywords, open_shortcuts_panel, ask_edit_command_alias,
     receive_command_alias, reset_command_alias_cb, reset_all_command_aliases_cb,
@@ -135,6 +137,15 @@ async def on_group_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "دوز":
         if db.is_feature_enabled(chat.id, "games"):
             await cmd_dooz(update, context)
+        return
+
+    # دانلودر اینستاگرام: دستور صریح (یادآوری خودپاک‌شونده)
+    if text == "دانلودر":
+        await instagram_dl.cmd_downloader_trigger(update, context)
+        return
+
+    # دانلودر اینستاگرام: تشخیص خودکار لینک، هرجای پیام که باشه
+    if await instagram_dl.try_handle_link(update, context):
         return
 
     # نگاشت کلمه‌ی فعلی (سفارشی یا پیش‌فرض) -> کلید اصلی، مخصوص همین گروه
@@ -369,10 +380,21 @@ def main():
         consumed = await extras.handle_text(update, context)
         if consumed:
             return
-        
+
         text = (update.effective_message.text or "").strip()
         if text in PRICE_LOOKUP_NAMES:
             await cmd_crypto_single(update, context)
+            return
+
+        # دانلودر اینستاگرام: تشخیص خودکار لینک همیشه فعاله (نیاز به دستور نیست)
+        if await instagram_dl.try_handle_link(update, context):
+            return
+        if text == "دانلودر":
+            await update.effective_message.reply_text(
+                "📥 دانلودر اینستاگرام\n\n"
+                "لینک ویدیوی اینستاگرام (ریلز، پست یا IGTV) رو همین‌جا بفرست، "
+                "خودم دانلودش می‌کنم و برات می‌فرستم."
+            )
             return
 
         # فقط اگه کاربر صراحتاً یه مدل هوش مصنوعی رو انتخاب کرده باشه، پیامش به AI می‌ره
