@@ -601,6 +601,7 @@ TOGGLEABLE_FEATURES = {
     "stats": "آمار گروه",
     "convert": "تبدیل ارز",
     "chart": "نمودار قیمت",
+    "instagram_dl": "دانلودر اینستاگرام",
 }
 
 
