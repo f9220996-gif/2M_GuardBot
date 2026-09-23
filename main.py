@@ -289,6 +289,9 @@ async def on_start_menu_button(update: Update, context: ContextTypes.DEFAULT_TYP
     from start import build_start_keyboard, START_TEXT
     query = update.callback_query
     await query.answer()
+    # با برگشتن به پنل اصلی، حالت دانلودر خاموش می‌شه؛ پنل اصلی نباید هیچ
+    # لینک/ویدیویی رو پردازش کنه - فقط داخل همون بخش مخصوص دانلودر فعاله
+    context.user_data["downloader_mode"] = False
     bot_username = (await context.bot.get_me()).username
     await query.edit_message_text(
         START_TEXT,
@@ -386,15 +389,13 @@ def main():
             await cmd_crypto_single(update, context)
             return
 
-        # دانلودر اینستاگرام: تشخیص خودکار لینک همیشه فعاله (نیاز به دستور نیست)
+        # دانلودر اینستاگرام: فقط وقتی از دکمه‌ی «📥 دانلودر اینستاگرام» یا با
+        # تایپ کردن «دانلودر» وارد اون بخش شده باشه، لینک‌ها پردازش می‌شن؛
+        # وگرنه (تو بقیه‌ی پی‌وی) لینک نادیده گرفته می‌شه که پنل اصلی شلوغ نشه
         if await instagram_dl.try_handle_link(update, context):
             return
         if text == "دانلودر":
-            await update.effective_message.reply_text(
-                "📥 دانلودر اینستاگرام\n\n"
-                "لینک ویدیوی اینستاگرام (ریلز، پست یا IGTV) رو همین‌جا بفرست، "
-                "خودم دانلودش می‌کنم و برات می‌فرستم."
-            )
+            await instagram_dl.private_downloader_command(update, context)
             return
 
         # فقط اگه کاربر صراحتاً یه مدل هوش مصنوعی رو انتخاب کرده باشه، پیامش به AI می‌ره
@@ -474,6 +475,7 @@ def main():
     app.add_handler(CallbackQueryHandler(rps_pick, pattern="^rps_pick:"))
     app.add_handler(CallbackQueryHandler(dooz_level, pattern="^dooz_lvl:"))
     app.add_handler(CallbackQueryHandler(dooz_move, pattern="^dooz:"))
+    app.add_handler(CallbackQueryHandler(instagram_dl.open_downloader_panel, pattern="^dl_panel_open$"))
 
     # ===== چک لیست سیاه =====
     app.add_handler(MessageHandler(
