@@ -27,7 +27,7 @@ import re
 import tempfile
 import time
 
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
 try:
@@ -141,7 +141,13 @@ async def _feature_enabled(chat) -> bool:
 # ---------------------------------------------------------------------------
 
 async def try_handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """اگه پیام لینک اینستاگرام داشت، دانلود و ارسال می‌کنه و True برمی‌گردونه"""
+    """
+    اگه پیام لینک اینستاگرام داشت، دانلود و ارسال می‌کنه و True برمی‌گردونه.
+    تو گروه: همیشه فعاله (اگه قابلیتش خاموش نشده باشه).
+    تو پی‌وی: فقط وقتی کاربر از دکمه‌ی «📥 دانلودر اینستاگرام» وارد اون بخش شده باشه
+    (یعنی حالت downloader_mode روشن باشه)، وگرنه لینک نادیده گرفته می‌شه تا پی‌وی
+    شلوغ نشه و همه‌چیز فقط داخل همون بخش مخصوص اتفاق بیفته.
+    """
     message = update.effective_message
     chat = update.effective_chat
     if not message or not message.text:
@@ -151,8 +157,12 @@ async def try_handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not url:
         return False
 
-    if not await _feature_enabled(chat):
-        return False
+    if chat and chat.type in GROUP_TYPES:
+        if not await _feature_enabled(chat):
+            return False
+    else:
+        if not context.user_data.get("downloader_mode"):
+            return False
 
     status = await message.reply_text("⏳ در حال دانلود ویدیو...")
     path, error = await download_instagram_video(url)
@@ -246,3 +256,38 @@ async def _finish_wait_cleanup(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.delete_message(chat_id=chat.id, message_id=mid)
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# پنل دانلودر تو پی‌وی: یه بخش جدا که با کلیک روش فعال می‌شه.
+# قبل از ورود به این بخش، لینک‌ها تو پی‌وی نادیده گرفته می‌شن (بالا چک شد)
+# تا پنل اصلی و بقیه‌ی پی‌وی شلوغ نمونه؛ همه‌چیز فقط اینجا اتفاق می‌افته.
+# ---------------------------------------------------------------------------
+
+DOWNLOADER_PANEL_TEXT = (
+    "📥 دانلودر اینستاگرام\n\n"
+    "لینک ویدیوی اینستاگرام (ریلز، پست یا IGTV) رو همین‌جا بفرست، "
+    "خودم دانلودش می‌کنم و برات می‌فرستم.\n\n"
+    "می‌تونی چند تا لینک پشت‌سرهم بفرستی. برای خروج از این بخش، دکمه‌ی زیر رو بزن."
+)
+
+
+def _downloader_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ بازگشت به پنل اصلی", callback_data="start_menu")]
+    ])
+
+
+async def open_downloader_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """کلیک روی دکمه‌ی «📥 دانلودر اینستاگرام» تو پنل اصلی پی‌وی"""
+    query = update.callback_query
+    await query.answer()
+    context.user_data["downloader_mode"] = True
+    await query.edit_message_text(DOWNLOADER_PANEL_TEXT, reply_markup=_downloader_keyboard())
+
+
+async def private_downloader_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """وقتی تو پی‌وی به‌جای زدن دکمه، مستقیم کلمه‌ی «دانلودر» رو تایپ کنه"""
+    context.user_data["downloader_mode"] = True
+    await update.effective_message.reply_text(DOWNLOADER_PANEL_TEXT, reply_markup=_downloader_keyboard())
+ج
