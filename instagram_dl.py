@@ -49,6 +49,16 @@ GROUP_TYPES = ("group", "supergroup")
 
 COOKIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "instagram_cookies.txt")
 
+# آیدی پیام «لینک رو بفرست» تو پی‌وی، تا با اولین لینک که برسه پاک بشه
+DOWNLOADER_PANEL_MSG_KEY = "downloader_panel_msg_id"
+
+
+def _video_back_keyboard(link_message_id: int):
+    """دکمه‌ی زیر خودِ ویدیو تو پی‌وی: با زدنش، ویدیو + پیام لینک پاک می‌شن و برمی‌گرده به پنل اصلی"""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ بازگشت به پنل اصلی", callback_data=f"dl_back:{link_message_id}")]
+    ])
+
 
 def find_instagram_link(text: str):
     if not text:
@@ -157,25 +167,36 @@ async def try_handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not url:
         return False
 
-    if chat and chat.type in GROUP_TYPES:
+    is_private = not (chat and chat.type in GROUP_TYPES)
+
+    if not is_private:
         if not await _feature_enabled(chat):
             return False
     else:
         if not context.user_data.get("downloader_mode"):
             return False
+        # پیام «لینک رو بفرست» دیگه لازم نیست، همین اولین لینک که رسید پاکش می‌کنیم
+        panel_msg_id = context.user_data.pop(DOWNLOADER_PANEL_MSG_KEY, None)
+        if panel_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=chat.id, message_id=panel_msg_id)
+            except Exception:
+                pass
+
+    back_kb = _video_back_keyboard(message.message_id) if is_private else None
 
     status = await message.reply_text("⏳ در حال دانلود ویدیو...")
     path, error = await download_instagram_video(url)
 
     if error:
         try:
-            await status.edit_text(f"❌ {error}")
+            await status.edit_text(f"❌ {error}", reply_markup=back_kb)
         except Exception:
             pass
     else:
         try:
             with open(path, "rb") as f:
-                await message.reply_video(video=f, caption="📥 دانلود شد")
+                await message.reply_video(video=f, caption="📥 دانلود شد", reply_markup=back_kb, has_spoiler=True)
             try:
                 await status.delete()
             except Exception:
@@ -183,7 +204,7 @@ async def try_handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception as e:
             logger.warning(f"ارسال ویدیوی اینستاگرام ناموفق بود: {e}")
             try:
-                await status.edit_text("❌ ویدیو دانلود شد ولی ارسالش ناموفق بود (احتمالاً حجم بالاست).")
+                await status.edit_text("❌ ویدیو دانلود شد ولی ارسالش ناموفق بود (احتمالاً حجم بالاست).", reply_markup=back_kb)
             except Exception:
                 pass
         finally:
@@ -284,9 +305,51 @@ async def open_downloader_panel(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     context.user_data["downloader_mode"] = True
     await query.edit_message_text(DOWNLOADER_PANEL_TEXT, reply_markup=_downloader_keyboard())
+    # همون پیام (که الان ویرایش شد) به‌عنوان پیام «لینک رو بفرست» ثبت می‌شه
+    context.user_data[DOWNLOADER_PANEL_MSG_KEY] = query.message.message_id
 
 
 async def private_downloader_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """وقتی تو پی‌وی به‌جای زدن دکمه، مستقیم کلمه‌ی «دانلودر» رو تایپ کنه"""
     context.user_data["downloader_mode"] = True
-    await update.effective_message.reply_text(DOWNLOADER_PANEL_TEXT, reply_markup=_downloader_keyboard())
+    sent = await update.effective_message.reply_text(DOWNLOADER_PANEL_TEXT, reply_markup=_downloader_keyboard())
+    context.user_data[DOWNLOADER_PANEL_MSG_KEY] = sent.message_id
+
+
+async def handle_downloader_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    کلیک روی دکمه‌ی «⬅️ بازگشت به پنل اصلی» که زیر خودِ ویدیو (یا پیام خطا) نشسته:
+    خودِ اون پیام + پیام لینکی که کاربر فرستاده بود پاک می‌شن، و یه پنل اصلی تازه فرستاده می‌شه.
+    """
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+
+    try:
+        link_message_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        link_message_id = None
+
+    # پاک کردن خودِ ویدیو/پیام خطا
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    # پاک کردن پیام لینکی که خودِ کاربر فرستاده بود
+    if link_message_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=link_message_id)
+        except Exception:
+            pass
+
+    context.user_data["downloader_mode"] = False
+
+    # فرستادن یه پنل اصلی تازه (پنل قبلی، اگه هنوز جایی مونده باشه، پاک می‌شه)
+    from start import build_start_keyboard, START_TEXT, _delete_old_panel, _remember_panel
+    await _delete_old_panel(context, chat_id)
+    bot_username = (await context.bot.get_me()).username
+    sent = await context.bot.send_message(
+        chat_id, START_TEXT,
+        reply_markup=build_start_keyboard(query.from_user.id, bot_username)
+    )
+    _remember_panel(chat_id, sent.message_id)
