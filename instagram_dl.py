@@ -290,4 +290,3 @@ async def private_downloader_command(update: Update, context: ContextTypes.DEFAU
     """وقتی تو پی‌وی به‌جای زدن دکمه، مستقیم کلمه‌ی «دانلودر» رو تایپ کنه"""
     context.user_data["downloader_mode"] = True
     await update.effective_message.reply_text(DOWNLOADER_PANEL_TEXT, reply_markup=_downloader_keyboard())
-ج
