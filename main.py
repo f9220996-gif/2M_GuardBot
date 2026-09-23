@@ -476,6 +476,7 @@ def main():
     app.add_handler(CallbackQueryHandler(dooz_level, pattern="^dooz_lvl:"))
     app.add_handler(CallbackQueryHandler(dooz_move, pattern="^dooz:"))
     app.add_handler(CallbackQueryHandler(instagram_dl.open_downloader_panel, pattern="^dl_panel_open$"))
+    app.add_handler(CallbackQueryHandler(instagram_dl.handle_downloader_back, pattern=r"^dl_back:"))
 
     # ===== چک لیست سیاه =====
     app.add_handler(MessageHandler(
