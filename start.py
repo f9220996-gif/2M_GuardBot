@@ -57,6 +57,8 @@ def build_start_keyboard(user_id: int, bot_username: str):
         InlineKeyboardButton("🧠 هوش مصنوعی", callback_data="ai_model_select"),
         InlineKeyboardButton("📩 پشتیبانی", callback_data="support_menu"),
     ])
+    # بخش جدا برای دانلودر اینستاگرام: تا کلیک نشه، هیچ لینک/ویدیویی تو پی‌وی پردازش نمی‌شه
+    rows.append([InlineKeyboardButton("📥 دانلودر اینستاگرام", callback_data="dl_panel_open")])
     rows.append([InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
     return InlineKeyboardMarkup(rows)
 
@@ -135,7 +137,7 @@ HELP_TEXT = (
     "🔧 مدیریت گروه\n"
     "خاموشی، روشن، سکوت، آزاد کن، بن کن، اخطار، پاک، گیف بن، استیکر بن\n\n"
     "🎮 سرگرمی\n"
-    "تاس، شیر یا خط، سنگ کاغذ قیچی\n\n"
+    "تاس، شیر یا خط، سنگ کاغذ قیچی، دوز\n\n"
     "🌐 ابزار\n"
     "ترجمه، تاریخ، رمز ارز، گزارش\n\n"
     "🧠 هوش مصنوعی\n"
