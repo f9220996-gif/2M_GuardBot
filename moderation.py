@@ -27,7 +27,7 @@ async def _require_group(update: Update):
 
 
 async def _reply(update, text, parse_mode=None):
-    await update.effective_message.reply_text(text, parse_mode=parse_mode)
+    return await update.effective_message.reply_text(text, parse_mode=parse_mode)
 
 
 def _display_name(target):
@@ -193,6 +193,10 @@ async def cmd_roshan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # سکوت [مدت]  (باید ریپلای روی پیام کاربر باشد)
 # ---------------------------------------------------------------------------
 
+def _automute_job_name(chat_id, user_id):
+    return f"automute_{chat_id}_{user_id}"
+
+
 async def cmd_sokoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _require_group(update):
         return
@@ -246,13 +250,92 @@ async def cmd_sokoot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_mute(chat.id, target.id, username, reason, bool(reason), until_ts)
     mention = _mention_html(target.id, username)
 
-    await _reply(
+    # اگه قبلاً برای همین کاربر یه تایمر پایان‌سکوت زمان‌بندی شده بود (سکوت قبلی)، لغوش می‌کنیم
+    for job in context.job_queue.get_jobs_by_name(_automute_job_name(chat.id, target.id)):
+        job.schedule_removal()
+
+    sent = await _reply(
         update,
         f"🔇 {mention} به مدت {build_duration_text(duration)} سکوت شد.\n"
         f"{escape(build_restriction_message(until_dt_display, chat.title))}"
         + (f"\nدلیل: {escape(reason)}" if reason else ""),
         parse_mode="HTML"
     )
+
+    # وقتی مدت سکوت تموم بشه: خودکار آزادش کن، پیام «سکوت شد» رو پاک کن،
+    # و یه پیام کوتاه «سکوت تموم شد» بفرست
+    context.job_queue.run_once(
+        _auto_unmute_expired,
+        when=duration,
+        chat_id=chat.id,
+        name=_automute_job_name(chat.id, target.id),
+        data={
+            "chat_id": chat.id,
+            "user_id": target.id,
+            "username": username,
+            "announce_message_id": sent.message_id if sent else None,
+        },
+    )
+
+
+async def _auto_unmute_expired(context: ContextTypes.DEFAULT_TYPE):
+    """بعد از تموم شدن مدت سکوت: کاربر رو آزاد می‌کنه، پیام اولیه‌ی سکوت رو پاک می‌کنه و اعلام می‌کنه"""
+    data = context.job.data
+    chat_id = data["chat_id"]
+    user_id = data["user_id"]
+    username = data["username"]
+    announce_message_id = data.get("announce_message_id")
+
+    # اگه قبل از تموم شدن مدت، کسی دستی آزادش کرده بود (رکورد پاک شده)،
+    # این جاب دیگه لازم نیست کاری بکنه (باید تو cmd_azad_kon لغو شده باشه،
+    # ولی این چک هم برای اطمینانه)
+    record = None
+    try:
+        record = db.get_mute_record(chat_id, user_id)
+    except Exception:
+        pass
+    if not record:
+        return
+
+    try:
+        await context.bot.restrict_chat_member(
+            chat_id, user_id,
+            permissions=ChatPermissions(
+                can_send_messages=True,
+                can_send_audios=True,
+                can_send_documents=True,
+                can_send_photos=True,
+                can_send_videos=True,
+                can_send_video_notes=True,
+                can_send_voice_notes=True,
+                can_send_polls=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True,
+            )
+        )
+    except Exception:
+        pass
+
+    db.remove_mute(chat_id, user_id)
+
+    if announce_message_id:
+        try:
+            await context.bot.delete_message(chat_id, announce_message_id)
+        except Exception:
+            pass
+
+    mention = _mention_html(user_id, username)
+    try:
+        freed_msg = await context.bot.send_message(
+            chat_id, f"🔊 مدت سکوت {mention} تمام شد و آزاد شد.", parse_mode="HTML"
+        )
+        context.job_queue.run_once(
+            _delete_message_later, when=10,
+            data={"chat_id": chat_id, "message_id": freed_msg.message_id},
+            name=f"delautomute_{chat_id}_{freed_msg.message_id}"
+        )
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +383,13 @@ async def cmd_azad_kon(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     db.remove_mute(chat.id, target.id)
+
+    # چون کاربر دستی و زودتر از موعد آزاد شد، تایمر خودکارِ پایانِ سکوت
+    # (که قرار بود بعداً پیام «سکوت تموم شد» رو بفرسته و پیام اولیه رو پاک
+    # کنه) رو لغو می‌کنیم که دوباره و اضافی کار نکنه
+    for job in context.job_queue.get_jobs_by_name(_automute_job_name(chat.id, target.id)):
+        job.schedule_removal()
+
     username = _display_name(target)
     mention = _mention_html(target.id, username)
     sent_msg = await update.effective_message.reply_text(f"🔊 سکوت {mention} برداشته شد.", parse_mode="HTML")
