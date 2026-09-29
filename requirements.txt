@@ -11,4 +11,3 @@ openai==1.54.0
 aiohttp==3.10.10
 matplotlib
 yt-dlp
-pip show yt-dlp
