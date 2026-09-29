@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-دانلود و ارسال خودکار ویدیوی اینستاگرام از روی لینک.
+دانلود و ارسال خودکار مدیای اینستاگرام از روی لینک (عکس، ویدیو، یا پست چندتایی/کاروسل).
 
 هر لینک اینستاگرامی (ریلز، پست، IGTV) که تو پی‌وی یا گروه فرستاده بشه،
-خودکار دانلود و به‌صورت ویدیو فرستاده می‌شه. فقط اینستاگرام پشتیبانی می‌شه.
+خودکار دانلود و فرستاده می‌شه. اگه پست چندتا عکس/ویدیو (کاروسل) داشته
+باشه، همه‌شون با هم (تا سقف ۱۰ تا، محدودیت خودِ تلگرام) فرستاده می‌شن.
+فقط اینستاگرام پشتیبانی می‌شه.
 
 نصب لازم روی سرور:
     pip install yt-dlp
@@ -12,7 +14,7 @@
 assets/instagram_cookies.txt کنار پروژه بذار؛ خودکار استفاده می‌شه.
 
 دستور «دانلودر» تو گروه: یه یادآوریِ خودپاک‌شونده‌ست. اگه کسی بنویسه «دانلودر»،
-ربات می‌گه لینک رو بفرست. اگه لینک بده، ویدیو دانلود و فرستاده می‌شه و خودِ
+ربات می‌گه لینک رو بفرست. اگه لینک بده، مدیا دانلود و فرستاده می‌شه و خودِ
 پیام «دانلودر» + یادآوریِ ربات پاک می‌شن که گروه شلوغ نمونه. اگه یادش بره و
 لینک نفرسته، بعد از چند دقیقه همون دو پیام خودکار پاک می‌شن.
 
@@ -27,7 +29,10 @@ import re
 import tempfile
 import time
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import (
+    Update, InlineKeyboardMarkup, InlineKeyboardButton,
+    InputMediaPhoto, InputMediaVideo,
+)
 from telegram.ext import ContextTypes
 
 try:
@@ -44,8 +49,12 @@ INSTAGRAM_RE = re.compile(
 )
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024   # محدودیت آپلود فایل برای ربات‌های تلگرام
+MAX_MEDIA_GROUP = 10                   # سقف تلگرام برای هر آلبوم/مدیاگروپ
 DOWNLOADER_WAIT_TIMEOUT = 180          # ثانیه؛ بعدش یادآوری خودکار پاک می‌شه
 GROUP_TYPES = ("group", "supergroup")
+
+PHOTO_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+VIDEO_EXTENSIONS = {"mp4", "mov", "mkv", "webm"}
 
 COOKIES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "instagram_cookies.txt")
 
@@ -54,7 +63,7 @@ DOWNLOADER_PANEL_MSG_KEY = "downloader_panel_msg_id"
 
 
 def _video_back_keyboard(link_message_id: int):
-    """دکمه‌ی زیر خودِ ویدیو تو پی‌وی: با زدنش، ویدیو + پیام لینک پاک می‌شن و برمی‌گرده به پنل اصلی"""
+    """دکمه‌ی زیر مدیا تو پی‌وی: با زدنش، مدیا + پیام لینک پاک می‌شن و برمی‌گرده به پنل اصلی"""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⬅️ بازگشت به پنل اصلی", callback_data=f"dl_back:{link_message_id}")]
     ])
@@ -67,15 +76,23 @@ def find_instagram_link(text: str):
     return m.group(0) if m else None
 
 
+def _is_photo_path(path: str) -> bool:
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    return ext in PHOTO_EXTENSIONS
+
+
 def _download_blocking(url: str, out_dir: str):
-    """دانلود مسدودکننده با yt-dlp؛ باید تو یه ترد جدا صدا زده بشه"""
-    out_tmpl = os.path.join(out_dir, "video.%(ext)s")
+    """
+    دانلود مسدودکننده با yt-dlp؛ باید تو یه ترد جدا صدا زده بشه.
+    اگه پست تک‌آیتمی باشه، یه فایل برمی‌گردونه؛ اگه کاروسل (چند عکس/ویدیو)
+    باشه، همه‌ی آیتم‌ها رو دانلود و لیست مسیرهاشون رو برمی‌گردونه.
+    """
+    out_tmpl = os.path.join(out_dir, "item_%(playlist_index,autonumber)02d.%(ext)s")
     opts = {
         "outtmpl": out_tmpl,
-        "format": "best[ext=mp4]/best",
         "quiet": True,
         "no_warnings": True,
-        "noplaylist": True,
+        "noplaylist": False,   # اجازه بده کل کاروسل دانلود بشه، نه فقط اولین آیتم
         "max_filesize": MAX_UPLOAD_BYTES,
         "socket_timeout": 30,
         "retries": 2,
@@ -83,30 +100,61 @@ def _download_blocking(url: str, out_dir: str):
     if os.path.exists(COOKIES_PATH):
         opts["cookiefile"] = COOKIES_PATH
 
+    paths = []
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        path = ydl.prepare_filename(info)
-        return path
+        entries = info.get("entries") if isinstance(info, dict) else None
+        if entries:
+            for entry in entries:
+                if not entry:
+                    continue
+                try:
+                    p = ydl.prepare_filename(entry)
+                except Exception:
+                    continue
+                if os.path.exists(p):
+                    paths.append(p)
+        else:
+            p = ydl.prepare_filename(info)
+            if os.path.exists(p):
+                paths.append(p)
+
+    # اگه به هر دلیلی prepare_filename مسیر درست رو نداد، هرچی تو پوشه‌ی
+    # موقت واقعاً دانلود شده رو (به ترتیب اسم) به‌عنوان جایگزین برمی‌داریم
+    if not paths:
+        for name in sorted(os.listdir(out_dir)):
+            paths.append(os.path.join(out_dir, name))
+
+    return paths
 
 
-async def download_instagram_video(url: str):
+async def download_instagram_media(url: str):
     """
-    دانلود ویدیو تو یه پوشه‌ی موقت.
-    خروجی: (path, error). اگه error خالی بود یعنی موفق؛ فایل باید بعداً
-    توسط caller (با _cleanup_file) پاک بشه.
+    دانلود همه‌ی آیتم‌های یه لینک اینستاگرام (عکس/ویدیو/کاروسل) تو یه پوشه‌ی موقت.
+    خروجی: (paths, error). اگه error خالی بود یعنی موفق و paths لیست غیرخالیه؛
+    فایل‌ها باید بعداً توسط caller (با _cleanup_files) پاک بشن.
     """
     if not HAS_YTDLP:
         return None, "کتابخونه‌ی yt-dlp روی سرور نصب نیست."
 
     tmp_dir = tempfile.mkdtemp(prefix="igdl_")
     try:
-        path = await asyncio.to_thread(_download_blocking, url, tmp_dir)
-        if not path or not os.path.exists(path):
+        paths = await asyncio.to_thread(_download_blocking, url, tmp_dir)
+        if not paths:
             return None, "دانلود ناموفق بود."
-        if os.path.getsize(path) > MAX_UPLOAD_BYTES:
-            _cleanup_file(path)
-            return None, "حجم ویدیو بیشتر از حد مجاز ارسال ربات (۵۰ مگابایت) است."
-        return path, None
+
+        total_size = sum(os.path.getsize(p) for p in paths if os.path.exists(p))
+        if total_size > MAX_UPLOAD_BYTES * MAX_MEDIA_GROUP:
+            _cleanup_files(paths)
+            return None, "حجم مدیا بیشتر از حد مجاز ارسال ربات است."
+
+        # سقف تلگرام برای هر آلبوم ۱۰ تا آیتمه
+        if len(paths) > MAX_MEDIA_GROUP:
+            for extra in paths[MAX_MEDIA_GROUP:]:
+                _cleanup_file(extra)
+            paths = paths[:MAX_MEDIA_GROUP]
+
+        return paths, None
     except Exception as e:
         msg = str(e).lower()
         try:
@@ -119,8 +167,8 @@ async def download_instagram_video(url: str):
             return None, "این پست خصوصیه و قابل دانلود نیست."
         if "login" in msg or "rate-limit" in msg or "429" in msg:
             return None, "اینستاگرام فعلاً درخواست رو رد کرد (نیاز به کوکی لاگین‌شده دارد)."
-        if "unsupported url" in msg or "no video" in msg:
-            return None, "این لینک معتبر یا ویدیودار نیست."
+        if "unsupported url" in msg:
+            return None, "این لینک معتبر نیست."
         logger.warning(f"خطای دانلود اینستاگرام: {e}")
         return None, "دانلود این لینک ناموفق بود."
 
@@ -128,10 +176,20 @@ async def download_instagram_video(url: str):
 def _cleanup_file(path):
     try:
         if path and os.path.exists(path):
-            folder = os.path.dirname(path)
             os.remove(path)
-            if not os.listdir(folder):
-                os.rmdir(folder)
+    except Exception:
+        pass
+
+
+def _cleanup_files(paths):
+    if not paths:
+        return
+    folder = os.path.dirname(paths[0])
+    for p in paths:
+        _cleanup_file(p)
+    try:
+        if folder and os.path.exists(folder) and not os.listdir(folder):
+            os.rmdir(folder)
     except Exception:
         pass
 
@@ -144,6 +202,44 @@ async def _feature_enabled(chat) -> bool:
         return db.is_feature_enabled(chat.id, "instagram_dl")
     except Exception:
         return True
+
+
+async def _send_media(message, paths, caption, reply_markup, has_spoiler=False):
+    """
+    یه فایل -> reply_photo یا reply_video (بسته به نوعش).
+    چند فایل -> reply_media_group (آلبوم)، بعدش اگه reply_markup لازم بود
+    (چون تلگرام رو خودِ آلبوم دکمه پشتیبانی نمی‌کنه) جدا زیرش فرستاده می‌شه.
+    """
+    if len(paths) == 1:
+        path = paths[0]
+        with open(path, "rb") as f:
+            if _is_photo_path(path):
+                return await message.reply_photo(
+                    photo=f, caption=caption, reply_markup=reply_markup, has_spoiler=has_spoiler
+                )
+            return await message.reply_video(
+                video=f, caption=caption, reply_markup=reply_markup, has_spoiler=has_spoiler
+            )
+
+    files = [open(p, "rb") for p in paths]
+    try:
+        media = []
+        for i, (path, f) in enumerate(zip(paths, files)):
+            kwargs = {"caption": caption} if i == 0 else {}
+            if _is_photo_path(path):
+                media.append(InputMediaPhoto(f, has_spoiler=has_spoiler, **kwargs))
+            else:
+                media.append(InputMediaVideo(f, has_spoiler=has_spoiler, **kwargs))
+        sent_list = await message.reply_media_group(media=media)
+        if reply_markup:
+            await message.reply_text("مدیریت این پست:", reply_markup=reply_markup)
+        return sent_list[0] if sent_list else None
+    finally:
+        for f in files:
+            try:
+                f.close()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -185,8 +281,8 @@ async def try_handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     back_kb = _video_back_keyboard(message.message_id) if is_private else None
 
-    status = await message.reply_text("⏳ در حال دانلود ویدیو...")
-    path, error = await download_instagram_video(url)
+    status = await message.reply_text("⏳ در حال دانلود...")
+    paths, error = await download_instagram_media(url)
 
     if error:
         try:
@@ -195,20 +291,22 @@ async def try_handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             pass
     else:
         try:
-            with open(path, "rb") as f:
-                await message.reply_video(video=f, caption="📥 دانلود شد", reply_markup=back_kb, has_spoiler=True)
-            try:
-                await status.delete()
-            except Exception:
-                pass
+            await status.delete()
+        except Exception:
+            pass
+        try:
+            await _send_media(message, paths, "📥 دانلود شد", back_kb)
         except Exception as e:
-            logger.warning(f"ارسال ویدیوی اینستاگرام ناموفق بود: {e}")
+            logger.warning(f"ارسال مدیای اینستاگرام ناموفق بود: {e}")
             try:
-                await status.edit_text("❌ ویدیو دانلود شد ولی ارسالش ناموفق بود (احتمالاً حجم بالاست).", reply_markup=back_kb)
+                await message.reply_text(
+                    "❌ مدیا دانلود شد ولی ارسالش ناموفق بود (احتمالاً حجم بالاست).",
+                    reply_markup=back_kb
+                )
             except Exception:
                 pass
         finally:
-            _cleanup_file(path)
+            _cleanup_files(paths)
 
     await _finish_wait_cleanup(update, context)
     return True
@@ -246,7 +344,7 @@ async def cmd_downloader_trigger(update: Update, context: ContextTypes.DEFAULT_T
     if not await _feature_enabled(chat):
         return
 
-    prompt = await message.reply_text("📥 لینک ویدیوی اینستاگرام رو بفرست.")
+    prompt = await message.reply_text("📥 لینک پست یا ویدیوی اینستاگرام رو بفرست.")
     wait = _wait_store(context)
     wait[user.id] = {
         "trigger_id": message.message_id,
@@ -287,8 +385,8 @@ async def _finish_wait_cleanup(update: Update, context: ContextTypes.DEFAULT_TYP
 
 DOWNLOADER_PANEL_TEXT = (
     "📥 دانلودر اینستاگرام\n\n"
-    "لینک ویدیوی اینستاگرام (ریلز، پست یا IGTV) رو همین‌جا بفرست، "
-    "خودم دانلودش می‌کنم و برات می‌فرستم.\n\n"
+    "لینک پست، ریلز یا IGTV اینستاگرام رو همین‌جا بفرست، خودم دانلودش "
+    "می‌کنم و برات می‌فرستم (اگه پست چند عکس/ویدیو داشت، همه‌شون با هم فرستاده می‌شن).\n\n"
     "می‌تونی چند تا لینک پشت‌سرهم بفرستی. برای خروج از این بخش، دکمه‌ی زیر رو بزن."
 )
 
@@ -318,7 +416,7 @@ async def private_downloader_command(update: Update, context: ContextTypes.DEFAU
 
 async def handle_downloader_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    کلیک روی دکمه‌ی «⬅️ بازگشت به پنل اصلی» که زیر خودِ ویدیو (یا پیام خطا) نشسته:
+    کلیک روی دکمه‌ی «⬅️ بازگشت به پنل اصلی» که زیر مدیا (یا پیام خطا) نشسته:
     خودِ اون پیام + پیام لینکی که کاربر فرستاده بود پاک می‌شن، و یه پنل اصلی تازه فرستاده می‌شه.
     """
     query = update.callback_query
@@ -330,7 +428,7 @@ async def handle_downloader_back(update: Update, context: ContextTypes.DEFAULT_T
     except (IndexError, ValueError):
         link_message_id = None
 
-    # پاک کردن خودِ ویدیو/پیام خطا
+    # پاک کردن خودِ مدیا/پیام خطا
     try:
         await query.message.delete()
     except Exception:
