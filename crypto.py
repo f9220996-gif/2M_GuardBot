@@ -10,6 +10,14 @@
 Railway) دیگه نمی‌تونن بهش وصل بشن. برای همین قیمت تتر از CoinGecko
 (بین‌المللی، رایگان، بدون محدودیت جغرافیایی) گرفته می‌شه. دلار و طلا
 مستقیماً از tgju میان.
+
+نکته‌ی مهم درباره‌ی کارایی:
+درخواست‌های شبکه (requests.get به tgju و CoinGecko) کاملاً synchronous ان.
+اگه مستقیم تو یه تابع async صدا زده بشن، وقتی یکی از این سایت‌ها کند یا
+هنگ کنه (که برای tgju چون سرور ایرانیه و از خارج بهش وصل می‌شیم خیلی
+محتمله)، کل event loop ربات قفل می‌شه و هیچ پیام دیگه‌ای (حتی تو بخش‌های
+کاملاً بی‌ربط مثل دانلودر) تا اون لحظه پردازش نمی‌شه. برای همین همه‌جا
+که این تابع‌ها صدا زده می‌شن، حتماً باید از asyncio.to_thread استفاده بشه.
 """
 
 import io
@@ -105,6 +113,9 @@ def _fa(text: str) -> str:
 
 # ---------------------------------------------------------------------------
 # دریافت داده: CoinGecko برای تتر، tgju برای نرخ دلار/طلا
+# این توابع کاملاً synchronous ان (requests.get معمولی)؛ هرجا صدا زده
+# می‌شن، حتماً باید با asyncio.to_thread تو یه ترد جدا اجرا بشن، وگرنه
+# کل ربات رو تا وقتی جواب بیاد قفل می‌کنن.
 # ---------------------------------------------------------------------------
 
 def fetch_coingecko_data():
@@ -412,6 +423,7 @@ async def _send_price_result(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 
 async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import asyncio
     import database as db
     text = (update.effective_message.text or "").strip()
     chat = update.effective_chat
@@ -420,7 +432,8 @@ async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text in FIAT_GOLD_MAP:
         key, emoji, trans_key = FIAT_GOLD_MAP[text]
         try:
-            tgju_data = fetch_tgju_data()
+            # requests.get سینکرونه؛ تو ترد جدا اجرا می‌شه تا کل ربات رو قفل نکنه
+            tgju_data = await asyncio.to_thread(fetch_tgju_data)
         except Exception as e:
             await update.effective_message.reply_text(f"❌ نتونستم قیمت {text} رو بگیرم.\n{e}")
             return
@@ -436,14 +449,14 @@ async def cmd_crypto_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         try:
-            tgju_data = fetch_tgju_data()
+            tgju_data = await asyncio.to_thread(fetch_tgju_data)
             usd_toman = get_usd_to_toman_rate(tgju_data)
         except Exception as e:
             await update.effective_message.reply_text(f"❌ نتونستم نرخ دلار رو بگیرم (لازم برای تبدیل قیمت به تومان).\n{e}")
             return
 
         try:
-            cg_data = fetch_coingecko_data()
+            cg_data = await asyncio.to_thread(fetch_coingecko_data)
         except Exception as e:
             await update.effective_message.reply_text(f"❌ نتونستم به CoinGecko وصل بشم.\n{e}")
             return
