@@ -4,9 +4,16 @@
 - با ریپلای روی یه پیام و نوشتن «ترجمه»
 - یا گذاشتن یه کلمه‌ی فعال‌ساز (پیش‌فرض: نقطه «.») جلوی متن (مثلاً: .hello)
 زبان مقصد و کلمه‌ی فعال‌ساز از پنل مدیریت گروه قابل تنظیمن.
+
+نکته‌ی مهم درباره‌ی کارایی:
+translate_text با requests.get کاملاً synchronous پیاده‌سازی شده. اگه
+مستقیم تو یه تابع async صدا زده بشه و گوگل ترنسلیت یه لحظه کند/هنگ کنه،
+کل event loop ربات قفل می‌شه و هیچ پیام دیگه‌ای (حتی تو بخش‌های کاملاً
+بی‌ربط) پردازش نمی‌شه. برای همین همه‌جا با asyncio.to_thread صدا زده می‌شه.
 """
 
 import re
+import asyncio
 import requests
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
@@ -72,7 +79,8 @@ async def cmd_tarjome(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_lang = db.get_translate_lang(chat.id)
     try:
-        translated = translate_text(source_text, target_lang)
+        # requests.get سینکرونه؛ تو ترد جدا اجرا می‌شه تا کل ربات رو قفل نکنه
+        translated = await asyncio.to_thread(translate_text, source_text, target_lang)
     except Exception as e:
         await message.reply_text(f"✘ ترجمه انجام نشد.\n{e}")
         return
@@ -100,7 +108,8 @@ async def check_dot_translate(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     target_lang = db.get_translate_lang(chat.id)
     try:
-        translated = translate_text(to_translate, target_lang)
+        # requests.get سینکرونه؛ تو ترد جدا اجرا می‌شه تا کل ربات رو قفل نکنه
+        translated = await asyncio.to_thread(translate_text, to_translate, target_lang)
     except Exception as e:
         await message.reply_text(f"✔ ترجمه انجام نشد.\n{e}")
         return True
