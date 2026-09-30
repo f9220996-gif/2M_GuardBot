@@ -58,7 +58,7 @@ def build_start_keyboard(user_id: int, bot_username: str):
         InlineKeyboardButton("📩 پشتیبانی", callback_data="support_menu"),
     ])
     # بخش جدا برای دانلودر اینستاگرام: تا کلیک نشه، هیچ لینک/ویدیویی تو پی‌وی پردازش نمی‌شه
-    rows.append([InlineKeyboardButton("📥 دانلودر اینستاگرام", callback_data="dl_panel_open")])
+    rows.append([InlineKeyboardButton("📥 دانلودر", callback_data="dl_panel_open")])
     rows.append([InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
     return InlineKeyboardMarkup(rows)
 
