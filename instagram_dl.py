@@ -51,6 +51,23 @@ logger = logging.getLogger(__name__)
 # که پایین‌تر مدیریت شده).
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 
+# لینک‌هایی که اصلاً نباید به‌عنوان «لینک دانلود» در نظر گرفته بشن - مخصوصاً
+# لینک‌های خودِ تلگرام (مثل t.me/...، که خیلی وقت‌ها برای اشتراک گروه/کانال/
+# پیام بین کاربرا رد و بدل می‌شه و ربطی به دانلود مدیا نداره)
+EXCLUDED_DOMAINS = ("t.me", "telegram.me", "telegram.org", "telegram.dog")
+
+
+def _is_excluded_url(url: str) -> bool:
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.lower()
+        host = host.split("@")[-1]  # اگه یوزرنیم/پسورد تو لینک بود
+        host = host.split(":")[0]   # پورت رو حذف کن
+        return any(host == d or host.endswith("." + d) for d in EXCLUDED_DOMAINS)
+    except Exception:
+        return False
+
+
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024   # محدودیت آپلود فایل برای ربات‌های تلگرام
 MAX_MEDIA_GROUP = 10                   # سقف تلگرام برای هر آلبوم/مدیاگروپ
 DOWNLOADER_WAIT_TIMEOUT = 180          # ثانیه؛ بعدش یادآوری خودکار پاک می‌شه
@@ -81,8 +98,11 @@ def find_instagram_link(text: str):
     """
     if not text:
         return None
-    m = URL_RE.search(text)
-    return m.group(0) if m else None
+    for m in URL_RE.finditer(text):
+        url = m.group(0)
+        if not _is_excluded_url(url):
+            return url
+    return None
 
 
 def _is_photo_path(path: str) -> bool:
@@ -174,10 +194,17 @@ async def download_instagram_media(url: str):
         if not paths:
             return None, "دانلود ناموفق بود."
 
-        total_size = sum(os.path.getsize(p) for p in paths if os.path.exists(p))
-        if total_size > MAX_UPLOAD_BYTES * MAX_MEDIA_GROUP:
-            _cleanup_files(paths)
-            return None, "حجم مدیا بیشتر از حد مجاز ارسال ربات است."
+        # نکته‌ی مهم: محدودیت آپلود تلگرام (۵۰ مگابایت) مال هر فایل به‌تنهایی‌ه،
+        # نه مجموع فایل‌ها. قبلاً اینجا اشتباهاً مجموع رو با ۵۰×۱۰=۵۰۰ مگابایت
+        # مقایسه می‌کرد، برای همین یه ویدیوی تکیِ ۲۰۰ مگابایتی قبول می‌شد ولی
+        # موقع ارسال با خطای تلگرام رد می‌شد. الان هر فایل جدا چک می‌شه.
+        oversized = [p for p in paths if os.path.exists(p) and os.path.getsize(p) > MAX_UPLOAD_BYTES]
+        if oversized:
+            for p in oversized:
+                _cleanup_file(p)
+            paths = [p for p in paths if p not in oversized]
+            if not paths:
+                return None, "حجم فایل بیشتر از حد مجاز ارسال ربات (۵۰ مگابایت) است."
 
         # سقف تلگرام برای هر آلبوم ۱۰ تا آیتمه
         if len(paths) > MAX_MEDIA_GROUP:
@@ -241,18 +268,24 @@ async def _send_media(message, paths, caption, reply_markup, has_spoiler=False):
     چند فایل -> reply_media_group (آلبوم)، بعدش اگه reply_markup لازم بود
     (چون تلگرام رو خودِ آلبوم دکمه پشتیبانی نمی‌کنه) جدا زیرش فرستاده می‌شه.
     """
+    """
+    خروجی: لیستی از همه‌ی پیام‌هایی که فرستاده شده (نه فقط اولی)، تا بشه
+    بعداً همه‌شون رو برای پاک‌سازیِ خودکار ردیابی کرد.
+    """
     if len(paths) == 1:
         path = paths[0]
         with open(path, "rb") as f:
             if _is_photo_path(path):
-                return await message.reply_photo(
+                sent = await message.reply_photo(
                     photo=f, caption=caption, reply_markup=reply_markup, has_spoiler=has_spoiler
                 )
-            if _is_audio_path(path):
-                return await message.reply_audio(audio=f, caption=caption, reply_markup=reply_markup)
-            return await message.reply_video(
-                video=f, caption=caption, reply_markup=reply_markup, has_spoiler=has_spoiler
-            )
+            elif _is_audio_path(path):
+                sent = await message.reply_audio(audio=f, caption=caption, reply_markup=reply_markup)
+            else:
+                sent = await message.reply_video(
+                    video=f, caption=caption, reply_markup=reply_markup, has_spoiler=has_spoiler
+                )
+        return [sent]
 
     files = [open(p, "rb") for p in paths]
     try:
@@ -266,9 +299,11 @@ async def _send_media(message, paths, caption, reply_markup, has_spoiler=False):
             else:
                 media.append(InputMediaVideo(f, has_spoiler=has_spoiler, **kwargs))
         sent_list = await message.reply_media_group(media=media)
+        all_sent = list(sent_list) if sent_list else []
         if reply_markup:
-            await message.reply_text("مدیریت این پست:", reply_markup=reply_markup)
-        return sent_list[0] if sent_list else None
+            btn_msg = await message.reply_text("مدیریت این پست:", reply_markup=reply_markup)
+            all_sent.append(btn_msg)
+        return all_sent
     finally:
         for f in files:
             try:
@@ -310,15 +345,26 @@ async def try_handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # (از همون سیستم مشترک پنل تو start.py استفاده می‌کنیم)
         from start import _delete_old_panel
         await _delete_old_panel(context, chat.id)
+        # این بخش طوری طراحی شده که تو پی‌وی مثل یه تک‌صفحه‌ای بمونه: با رسیدن
+        # هر لینک جدید، هر چی پیامِ نتیجه/خطای دانلودر از قبل مونده (نه فقط
+        # پنل بالایی) هم پاک می‌شه که پیام‌های قدیمی روی هم تلنبار نشن.
+        old_result_ids = context.user_data.pop("dl_last_result_msgs", None) or []
+        for mid in old_result_ids:
+            try:
+                await context.bot.delete_message(chat_id=chat.id, message_id=mid)
+            except Exception:
+                pass
 
     back_kb = _video_back_keyboard(message.message_id) if is_private else None
 
     status = await message.reply_text("⏳ در حال دانلود...")
     paths, error = await download_instagram_media(url)
 
+    result_ids = []
     if error:
         try:
             await status.edit_text(f"❌ {error}", reply_markup=back_kb)
+            result_ids.append(status.message_id)
         except Exception:
             pass
     else:
@@ -327,18 +373,23 @@ async def try_handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except Exception:
             pass
         try:
-            await _send_media(message, paths, "📥 دانلود شد", back_kb)
+            sent_msgs = await _send_media(message, paths, "📥 دانلود شد", back_kb)
+            result_ids.extend(m.message_id for m in sent_msgs if m)
         except Exception as e:
             logger.warning(f"ارسال مدیای اینستاگرام ناموفق بود: {e}")
             try:
-                await message.reply_text(
+                err_msg = await message.reply_text(
                     "❌ مدیا دانلود شد ولی ارسالش ناموفق بود (احتمالاً حجم بالاست).",
                     reply_markup=back_kb
                 )
+                result_ids.append(err_msg.message_id)
             except Exception:
                 pass
         finally:
             _cleanup_files(paths)
+
+    if is_private and result_ids:
+        context.user_data["dl_last_result_msgs"] = result_ids
 
     await _finish_wait_cleanup(update, context)
     return True
